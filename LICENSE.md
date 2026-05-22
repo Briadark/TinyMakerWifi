@@ -2,7 +2,7 @@
 
 Copyright 2023 TinyMaker LLC
 
-![](images/HARDWARE_LICENSE.png)
+![](Images/HARDWARE_LICENSE.png)
 
 **FIRMWARE: MIT LICENSE**
 
