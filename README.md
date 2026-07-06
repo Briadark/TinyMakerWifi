@@ -1,13 +1,14 @@
 # TinyMakerWifi
 
-Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D printer. The main additions: **WiFi connectivity** and **direct model upload from PrusaSlicer** — no more SD card shuffling.
+Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D printer. The main additions: **WiFi connectivity**, **OTA updates**, and **direct model upload from PrusaSlicer** — no more SD card shuffling.
 
 ## Features
 
 * **WiFi setup via captive portal** — no credentials in code, configured from your phone on first boot
-* **Direct upload from PrusaSlicer** ("Send to printer" button) — the printer emulates a minimal OctoPrint API
+* **Direct upload from PrusaSlicer** ("Send to printer" button) — the printer emulates the Prusa SL1 network protocol
+* **OTA (Over-the-Air) updates added** — update your firmware wirelessly without a USB cable
 * Automatic unpacking of uploaded `.sl1` / `.zip` files into the layer format the stock firmware expects (works with both PrusaSlicer and UVtools numbering)
-* New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), firmware Update info, About
+* New **System** menu on the printer: WiFi Info (SSID, signal, IP), firmware Update, About
 * WiFi status indicator (green/grey dot) on the main menu
 * Firmware update over WiFi: browser page at `/update` + PlatformIO OTA for developers *(since v1.0.2-vs-wifi-0.4)*
 * Everything is optional: build switches let you compile the original, network-free firmware from the same code base
@@ -15,6 +16,32 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 ## Hardware
 
 Stock TinyMaker electronics — **ESP32-WROOM-32E-N4** (4 MB flash, no PSRAM). No hardware modifications required; WiFi is already on the module.
+
+## Initial Firmware Installation
+
+If you are installing this firmware for the first time, you need to flash it via USB. After this one-time step, all future updates can be done wirelessly via your browser.
+
+### 1. Install Drivers
+If your computer does not recognize the printer when connected via USB, install the CH340 driver located in the `Driver` folder of this repository:
+* Run `CH341SER.EXE`.
+
+### 2. Download Tools & Firmware
+1. Locate the **`flash_download_tool.zip`** inside the `Flash_Installer` folder of this repository (or download it from the official [Espressif Flash Download Tool](https://docs.espressif.com/projects/esp-test-tools/en/latest/esp32/production_stage/tools/flash_download_tool.html) page). **Extract the ZIP archive fully before running.**
+2. Download the latest `firmware.bin` from the [Releases](https://github.com/slibbinas/TinyMakerWifi/releases) section of this repository.
+
+### 3. Flashing Steps
+1. Run the extracted `flash_download_tool_xxx.exe`.
+2. In the "Download Tool" window, select **ESP32** and **Develop** mode.
+3. Configure the settings as follows:
+    * **SPI Speed:** 40 MHz
+    * **SPI Mode:** DIO
+    * **Flash Size:** 32 Mbit (4MB)
+4. Click on the three dots `...` next to the first row and select your downloaded `firmware.bin` file.
+5. In the address field next to the file, enter: **`0x10000`**.
+6. Ensure the checkbox on the left of the file path is **checked**.
+7. Select the correct **COM port** for your printer.
+8. Click **START**.
+9. Once the progress bar reaches 100% and says "FINISH", power cycle your printer.
 
 ## First WiFi setup
 
@@ -32,13 +59,13 @@ WiFi status, signal strength and IP are always visible under **System → WiFi I
    * **Name:** anything (e.g. `TinyMaker WiFi`)
    * **Hostname, IP or URL:** `tinymaker.local` (or the printer's IP shown in System → WiFi Info)
    * **API Key:** any text (not verified)
-   * Note: there is no "Host Type" dropdown for SL1-derived profiles — that's normal, it is fixed in the profile.
+   * Note: The printer emulates the Prusa SL1 network protocol.
 3. Click **Test** — it should report a successful connection (printer must be on and connected to WiFi).
 4. Slice and press **Send to printer**. The printer shows *Receiving → Unpacking → Model ready*, and the model appears in the **Print** menu.
 
 **Always slice with the 0.05 mm profile.** The firmware is designed for 0.05 mm source layers (when the printer is set to 0.10 mm it skips every other image). Maximum model size: 1200 layers = 60 mm.
 
-## Firmware updates
+## Wireless Firmware Updates
 
 *(since v1.0.2-vs-wifi-0.4)*
 
@@ -59,25 +86,3 @@ Build switches at the top of the main `.ino`:
 ```cpp
 #define ENABLE_NETWORK       1   // 0 = original firmware behavior, no network code
 #define ENABLE_SERIAL_DEBUG  1   // 0 = no serial output
-```
-
-## Support this project
-
-If you find this project useful and want to support my work, you can [buy me a coffee via PayPal](https://paypal.me/Sidlauskas?locale.x=en_US&country.x=LT).
-
-
-## Credits & Acknowledgements
-
-* **Original project:** [TinyMaker-Open-Source-3D-Printer](https://github.com/TinyMaker3D/TinyMaker-Open-Source-3D-Printer)
-* **Original authors:** TinyMaker3D Team
-
-
-
-## License
-
-This project retains the original dual licensing of the TinyMaker3D project:
-
-* **Firmware:** MIT License
-* **Hardware:** CC BY-NC-SA 4.0
-
-See [`LICENSE.md`](LICENSE.md) for full details and copyright notices.
