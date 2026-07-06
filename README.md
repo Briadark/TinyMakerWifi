@@ -61,10 +61,17 @@ Build switches at the top of the main `.ino`:
 #define ENABLE_SERIAL_DEBUG  1   // 0 = no serial output
 ```
 
+## Support this project
+
+If you find this project useful and want to support my work, you can [buy me a coffee via PayPal](https://paypal.me/Sidlauskas?locale.x=en_US&country.x=LT).
+
+
 ## Credits & Acknowledgements
 
 * **Original project:** [TinyMaker-Open-Source-3D-Printer](https://github.com/TinyMaker3D/TinyMaker-Open-Source-3D-Printer)
 * **Original authors:** TinyMaker3D Team
+
+
 
 ## License
 
