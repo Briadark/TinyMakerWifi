@@ -24,13 +24,12 @@
 #define ENABLE_SERIAL_DEBUG  0   // 0 = jokio Serial isvesties
 
 #if ENABLE_SERIAL_DEBUG
-  #define DBG(...)   Serial.printf(__VA_ARGS__)
-  #define DBGLN(x)   Serial.println(x)
+  #define DBG    Serial.printf
+  #define DBGLN(x)  Serial.println(x)
 #else
-  #define DBG(...)
+  static inline void DBG(const char *, ...) {}
   #define DBGLN(x)
 #endif
-
 
 #include <SPI.h>
 #include <EEPROM.h>              // For storing settings persistently

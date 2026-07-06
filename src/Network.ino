@@ -298,10 +298,13 @@ void network_setup() {
 
   MDNS.begin("tinymaker"); // http://tinymaker.local
 
-  // OctoPrint emulation for PrusaSlicer "Send to printer"
+  // OctoPrint-style API for PrusaSlicer "Send to printer".
+  // NOTE: SL1-derived profiles make PrusaSlicer use its SL1Host client,
+  // which REQUIRES the version "text" to start with "Prusa SLA" -
+  // otherwise Test fails with "Could not connect to Prusa SLA".
   server.on("/api/version", HTTP_GET, []() {
     server.send(200, "application/json",
-      "{\"api\":\"0.1\",\"server\":\"1.5.0\",\"text\":\"OctoPrint 1.5.0 (TinyMaker)\"}");
+      "{\"api\":\"0.1\",\"server\":\"1.5.0\",\"text\":\"Prusa SLA (TinyMaker)\"}");
   });
   server.on("/api/files/local", HTTP_POST, finishUpload, handleUploadData);
 
