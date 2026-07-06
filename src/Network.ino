@@ -310,7 +310,7 @@ void handleUpdatePage() {
 #endif
   page +=
     "</p><p>Get <b>firmware.bin</b> from "
-    "<a href='https://github.com/slibbinas/TinyMakerWifi/releases'>GitHub Releases</a>.</p>"
+    "<a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>.</p>"
     "<form method='POST' action='/update' enctype='multipart/form-data'>"
     "<input type='file' name='firmware' accept='.bin' required> "
     "<input type='submit' value='Update'></form>"
