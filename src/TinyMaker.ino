@@ -56,6 +56,29 @@
 #include <Preferences.h>   // forcePortal flag (survives reboot)
 #endif
 
+// Resin estimation globals live in PNG.ino - forward-declare for the
+// files compiled before it (Interface.ino, TinyMaker.ino)
+extern double resinUsedMl;
+extern double resinEstimateMl;
+bool estimateResin();               // returns true if user chose Start
+bool startFromResin = false;        // set when Start pressed on resin screen
+
+// Factory settings reset - shared by setup() (bad/blank EEPROM) and the
+// Settings -> "Back to Default" menu (Interface.ino).
+void resetSettingsToDefault();
+
+#if ENABLE_NETWORK
+// Self-update (defined in Network.ino) - forward-declared so screen421()
+// in Interface.ino and loop() can call them across the #if boundary
+// (auto-prototypes are not generated for functions inside #if blocks).
+void otaCheckLatest();
+const char *otaLatestVerStr();
+int otaVersionState();
+bool otaHasUpdate();
+void otaInstallLatest();
+void screen422();   // "install from file" screen (Interface.ino, #if-guarded)
+#endif
+
 // ===================================================================================
 // Pin Definitions
 // ===================================================================================
@@ -180,13 +203,47 @@ File myfile;
 PNG png; // PNG decoder instance
 
 // ===================================================================================
+// Settings
+// ===================================================================================
+/**
+ * @brief Write factory-default print settings to EEPROM and reload them into
+ * the live globals. Single source of truth for the defaults, used both on a
+ * blank/corrupt EEPROM at boot and by Settings -> "Back to Default".
+ * Layer_Height is stored x100 (10 -> 0.10 mm).
+ */
+void resetSettingsToDefault() {
+  EEPROM.write(1, 10);   // Layer_Height     -> 0.10 mm
+  EEPROM.write(2, 35);   // Base_Exposure
+  EEPROM.write(3, 14);   // Regular_Exposure
+  EEPROM.write(4, 2);    // Base_Layer
+  EEPROM.write(5, 5);    // Transition_Layer
+  EEPROM.write(6, 1);    // Slow_Lift_Distance
+  EEPROM.write(7, 2);    // Fast_Lift_Distance
+  EEPROM.write(8, 40);   // Slow_Lift_Feedrate
+  EEPROM.write(9, 50);   // Fast_Lift_Feedrate
+  EEPROM.write(10, 50);  // Drop_Back_Feedrate
+  EEPROM.commit();
+
+  Layer_Height = EEPROM.read(1) / 100.00;
+  Base_Exposure = EEPROM.read(2);
+  Regular_Exposure = EEPROM.read(3);
+  Base_Layer = EEPROM.read(4);
+  Transition_Layer = EEPROM.read(5);
+  Slow_Lift_Distance = EEPROM.read(6);
+  Fast_Lift_Distance = EEPROM.read(7);
+  Slow_Lift_Feedrate = EEPROM.read(8);
+  Fast_Lift_Feedrate = EEPROM.read(9);
+  Drop_Back_Feedrate = EEPROM.read(10);
+}
+
+// ===================================================================================
 // Setup Function
 // ===================================================================================
 /**
  * @brief Setup Function
  * Initializes all hardware components, loads settings, and sets the initial state
  */
-void setup() {  
+void setup() {
 
   #if ENABLE_SERIAL_DEBUG
   Serial.begin(115200);
@@ -256,7 +313,15 @@ void setup() {
   Slow_Lift_Feedrate = EEPROM.read(8);
   Fast_Lift_Feedrate = EEPROM.read(9);
   Drop_Back_Feedrate = EEPROM.read(10);
-  
+
+  // First boot after a full flash leaves EEPROM uninitialized (every byte
+  // reads 0xFF = 255), which produced Layer_Height 2.55 mm and absurd
+  // exposures/print-time estimates. Seed the same factory defaults the
+  // Settings -> "Back to Default" menu uses when values are out of range.
+  if (EEPROM.read(1) == 255 || Layer_Height < 0.01 || Layer_Height > 0.2) {
+    resetSettingsToDefault();
+  }
+
   delay(1000);
   #if ENABLE_NETWORK
   network_setup(); // SLIBBINAS WiFi + upload server (Network.ino)
@@ -389,11 +454,16 @@ void loop() {
       screen41();
         break;
       case 421:
-      screen41(); 
+      screen41();
       screen42();
         break;
+      #if ENABLE_NETWORK
+      case 422:                 // install-from-file screen -> back to Update
+      screen421();
+        break;
+      #endif
       case 431:
-      screen41(); 
+      screen41();
       screen43();
         break;
       case 311:
@@ -447,6 +517,12 @@ void loop() {
       case 2:
       screen1();    
         break;
+      case 111:                 // UP on preview screen -> estimate resin
+      if (estimateResin())
+        startFromResin = true;  // Start pressed -> print starts in OK handler
+      else
+        screen111();            // Back pressed -> redraw preview (Height/Time)
+        break;
       case 3:
       screen2();
         break;
@@ -456,6 +532,11 @@ void loop() {
       case 42:
       screen41();
         break;
+      #if ENABLE_NETWORK
+      case 421:                 // UP on Update screen -> install from file
+      screen422();
+        break;
+      #endif
       case 43:
       screen41(); 
       screen42();
@@ -562,8 +643,9 @@ void loop() {
 
   // -----------------------------------------------------------------------------------
   // OK Button Handling
-  // -----------------------------------------------------------------------------------  
-  if (digitalRead(buttonOK) == LOW) {
+  // (startFromResin lets the resin screen's "Start" flow straight into printing)
+  // -----------------------------------------------------------------------------------
+  if (digitalRead(buttonOK) == LOW || startFromResin) {
     switch (screen) {
       case 1:
       if (SD.begin(SDCS, SD_SCK_MHZ(16))){
@@ -634,9 +716,11 @@ void loop() {
       }
         break;
       case 111: {
+        startFromResin = false;   // consume the resin-screen Start request
         homing_canceled = false;
         print_paused = false;
         print_canceled = false;
+        resinUsedMl = 0.0;        // reset cured-resin counter for this print
         current_state = 0;
         current_layer = 0;
         Position_before_pause = 0;
@@ -956,6 +1040,9 @@ void loop() {
         break;
       case 3121:                // Confirmed -> erase credentials + reboot
         wifiDoReset();
+        break;
+      case 421:                 // Update screen -> install latest (self-update)
+        if (otaHasUpdate()) otaInstallLatest();
         break;
       #endif
       case 311:

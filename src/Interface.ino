@@ -189,37 +189,124 @@ void screen411(){
   screen = 411;
 }
 
+#if ENABLE_NETWORK
 /**
- * @brief Screen 421: Firmware update info (web /update)
+ * @brief Draw the Update screen's bottom row.
+ * Left  "Local" = UP opens the "install from file" screen (422).
+ * Right "Install" = OK self-updates; blue when an update is available,
+ * greyed out otherwise. (Physical Back leaves - see loop().)
+ */
+void screen421Buttons(bool installActive){
+  // Left: UP -> install from file (browser upload of any/older version)
+  gfx2->fillTriangle(10, 59, 5, 67, 15, 67, 0x879F);
+  gfx2->setFont(NULL);
+  gfx2->setTextColor(0x879F);
+  gfx2->setCursor(19, 62);
+  gfx2->print("Local");
+  // Right: OK -> install latest (self-update)
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->fillRoundRect(82, 58, 72, 18, 2, installActive ? 0x879F : DARKGREY);
+  gfx2->setTextColor(WHITE);
+  gfx2->setCursor(90, 71);
+  gfx2->print("Install");
+  gfx2->setFont(NULL);
+}
+
+/**
+ * @brief Screen 422: Install from file (browser upload of a specific/older
+ * version). Reached with UP from the Update screen; Back returns to 421.
+ */
+void screen422(){
+  gfx2->fillScreen(BLACK);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(ORANGE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(5, 14);
+  gfx2->print("Install from file");
+  gfx2->setFont(NULL);
+  gfx2->setTextColor(WHITE);
+  gfx2->setCursor(5, 30);
+  gfx2->print("Open in a browser and");
+  gfx2->setCursor(5, 42);
+  gfx2->print("upload a firmware.bin:");
+  gfx2->setCursor(5, 58);
+  if (WiFi.status() == WL_CONNECTED) {
+    gfx2->print("URL: ");
+    gfx2->print(WiFi.localIP());
+    gfx2->print("/update");
+  } else {
+    gfx2->print("WiFi not connected");
+  }
+  gfx2->setFont(&FreeSans8pt7b);
+  screen = 422;
+}
+#endif
+
+/**
+ * @brief Screen 421: Firmware update - installed vs latest, self-update.
+ * Shows the installed version, checks GitHub Pages for the latest, and
+ * offers "Install" (self-update, no PC). UP ("Local") opens screen 422 to
+ * install a specific/older version from a file via the browser.
  */
 void screen421(){
   gfx2->fillScreen(BLACK);
   gfx2->setFont(&FreeSans8pt7b);
-  gfx2->setTextColor(WHITE);
+  gfx2->setTextColor(ORANGE);   // orange title, matching About / WiFi Info
   gfx2->setTextSize(1);
-  gfx2->setCursor(5, 16);
+  gfx2->setCursor(5, 14);
   gfx2->print("Firmware update");
 #if ENABLE_NETWORK
-  gfx2->setFont(NULL); // built-in small font for URLs
-  gfx2->setCursor(5, 30);
-  if (WiFi.status() == WL_CONNECTED) {
-    gfx2->print("Open in browser:");
-    gfx2->setCursor(5, 44);
-    gfx2->print("http://");
-    gfx2->print(WiFi.localIP());
-    gfx2->print("/update");
-    gfx2->setCursor(5, 56);
-    gfx2->print("or tinymaker.local/update");
-  } else {
+  gfx2->setFont(NULL); // built-in small font for versions
+  gfx2->setTextColor(WHITE);
+  gfx2->setCursor(5, 26);
+  gfx2->print("Installed: v");
+#ifdef FIRMWARE_VERSION
+  gfx2->print(FIRMWARE_VERSION);
+#else
+  gfx2->print("?");
+#endif
+
+  if (WiFi.status() != WL_CONNECTED) {
+    gfx2->setCursor(5, 42);
     gfx2->print("WiFi not connected");
+    gfx2->setFont(&FreeSans8pt7b);
+    screen = 421;
+    return;
+  }
+
+  // First paint: "checking...", Local hint + greyed Install
+  gfx2->setCursor(5, 40);
+  gfx2->print("Latest: checking...");
+  screen421Buttons(false);
+  screen = 421;
+
+  // Blocking HTTPS check, then refresh the Latest line + Install button
+  otaCheckLatest();
+  gfx2->fillRect(0, 36, 160, 11, BLACK);   // clear the Latest line only
+  gfx2->setFont(NULL);
+  gfx2->setCursor(5, 40);
+  int st = otaVersionState();
+  if (st == 3) {                            // newer available
+    gfx2->setTextColor(0x879F);
+    gfx2->print("Latest: v");
+    gfx2->print(otaLatestVerStr());
+    screen421Buttons(true);
+  } else if (st == 2) {                     // already current
+    gfx2->setTextColor(WHITE);
+    gfx2->print("Up to date");
+    screen421Buttons(false);
+  } else {                                  // error / offline
+    gfx2->setTextColor(WHITE);
+    gfx2->print("Latest: unknown");
+    screen421Buttons(false);
   }
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
 #else
   gfx2->setTextColor(ORANGE);
   gfx2->setCursor(5, 55);
   gfx2->print("Network disabled");
-#endif
   screen = 421;
+#endif
 }
 
 /**
@@ -236,14 +323,16 @@ void screen431(){
   gfx2->setTextColor(WHITE);
   gfx2->setCursor(5, 28);
 #ifdef FIRMWARE_VERSION
-  gfx2->print("FW: ");
+  gfx2->print("FW: v");
   gfx2->print(FIRMWARE_VERSION);
 #else
-  gfx2->print("FW: 1.0.2");
+  gfx2->print("FW: v0.7.0");
 #endif
-  gfx2->setCursor(5, 46);
+  gfx2->setCursor(5, 40);
+  gfx2->print("Based on TinyMaker 1.0.2");
+  gfx2->setCursor(5, 54);
   gfx2->print("github.com/slibbinas/");
-  gfx2->setCursor(5, 58);
+  gfx2->setCursor(5, 64);
   gfx2->print("TinyMakerWifi");
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
   screen = 431;
@@ -349,6 +438,13 @@ void screen111(){
   gfx2->setCursor(7, 16);
   gfx2->print("Layers: ");
   gfx2->print(layer_counter);
+  // Hint: press UP to estimate resin -> small up-arrow icon + "ml".
+  // Compact icon leaves a margin from the orange frame (old "UP=ml" clipped).
+  gfx2->fillTriangle(120, 6, 115, 14, 125, 14, 0x879F); // up arrow
+  gfx2->setCursor(129, 16);
+  gfx2->setTextColor(0x879F);
+  gfx2->print("ml");
+  gfx2->setTextColor(WHITE);
   gfx2->setCursor(7, 34);
   gfx2->print("Height: "); 
   gfx2->print(total_height); 
@@ -446,9 +542,13 @@ void screen1111(){
   gfx2->print(layer_counter);
   gfx2->setCursor(6, 74);
   gfx2->print(estimated_hours);
-  gfx2->print("h ");
+  gfx2->print("h");
   gfx2->print(estimated_minutes);
-  gfx2->print("min");
+  gfx2->print("m ");
+  gfx2->setTextColor(0x879F);
+  gfx2->print(resinUsedMl, 1);
+  gfx2->print("ml");
+  gfx2->setTextColor(WHITE);
   screen = 1111;  
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1737,34 +1837,13 @@ void screen311(){
       screen = 311;
     }
     else{
-      // "Back to Default" Selected -> Reset EEPROM
-      EEPROM.write(1, 10);
-      EEPROM.write(2, 35);
-      EEPROM.write(3, 14);
-      EEPROM.write(4, 2);
-      EEPROM.write(5, 5);
-      EEPROM.write(6, 1);
-      EEPROM.write(7, 2);
-      EEPROM.write(8, 40);
-      EEPROM.write(9, 50);
-      EEPROM.write(10, 50);
-      EEPROM.commit(); 
-      
-      // Reload from EEPROM
-      Layer_Height = EEPROM.read(1) / 100.00;
-      Base_Exposure = EEPROM.read(2);
-      Regular_Exposure = EEPROM.read(3);
-      Base_Layer = EEPROM.read(4);
-      Transition_Layer = EEPROM.read(5);
-      Slow_Lift_Distance = EEPROM.read(6);
-      Fast_Lift_Distance = EEPROM.read(7);
-      Slow_Lift_Feedrate = EEPROM.read(8);
-      Fast_Lift_Feedrate = EEPROM.read(9);
-      Drop_Back_Feedrate = EEPROM.read(10);
-      
+      // "Back to Default" Selected -> Reset EEPROM to factory defaults
+      // (shared with setup(); defined in TinyMaker.ino)
+      resetSettingsToDefault();
+
       setting_item = 10;
-      screen31DOWN(); // Refresh Screen           
-    } 
+      screen31DOWN(); // Refresh Screen
+    }
   }
   delay(300);
 }

@@ -37,8 +37,16 @@
 #include <unzipLIB.h>      // bitbank2
 #include <Update.h>        // web /update firmware flashing
 #include <ArduinoOTA.h>    // PlatformIO espota uploads
+#include <WiFiClientSecure.h> // HTTPS to GitHub for version check + self-update
+#include <HTTPClient.h>       // fetch version.txt
+#include <HTTPUpdate.h>       // pull-and-flash firmware.bin (self-update)
 #include <esp_wifi.h>      // esp_wifi_restore() for reliable credential erase
 #include <Preferences.h>   // forcePortal flag (survives reboot)
+
+// Where the printer checks for a newer firmware (self-update, "Install latest").
+// version.txt must contain two lines: (1) the latest version, e.g. "0.7.0",
+// (2) the direct HTTPS URL of that firmware.bin. Both hosted on GitHub Pages.
+#define OTA_VERSION_URL "https://slibbinas.github.io/TinyMakerWifi/version.txt"
 
 WebServer server(80);
 Preferences netPrefs;
@@ -310,25 +318,67 @@ void finishUpload() {
 // Runs only from loop() -> physically impossible during printing.
 // ===================================================================================
 bool otaWebOk = false;
+bool otaBlocked = false;   // set when a flash is attempted outside the Update menu
+
+// Security: firmware flashing is only accepted while the printer is showing
+// the System -> Update screen (screen 421). Model upload from PrusaSlicer
+// (/api/files/local) is intentionally NOT gated - only firmware flashing is.
+#define OTA_UPDATE_SCREEN 421
+static bool otaMenuOpen() { return screen == OTA_UPDATE_SCREEN; }
+
+// Shared page chrome (head + styled card) for all firmware-update responses.
+// Pass the inner card HTML; returns the full document.
+String otaStyledPage(const String &inner) {
+  return String(
+    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>TinyMaker firmware update</title><style>"
+    "*{box-sizing:border-box}"
+    "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
+    "background:#1c1c1e;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#eee}"
+    ".card{background:#2a2a2e;border:2px solid #e8720c;border-radius:14px;padding:28px 26px;"
+    "max-width:360px;width:90%;box-shadow:0 8px 30px rgba(0,0,0,.4);text-align:center}"
+    "h1{margin:0 0 4px;font-size:20px;color:#e8720c}"
+    ".sub{font-size:14px;color:#eee;margin-bottom:6px}.ver{font-size:13px;color:#84bcf8;margin-bottom:20px}"
+    ".hint{font-size:13px;color:#aaa;margin:16px 0}"
+    "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}"
+    "input[type=file]{width:100%;margin:10px 0;padding:10px;border:1px solid #555;"
+    "border-radius:8px;background:#1c1c1e;color:#eee;font-size:13px}"
+    "input[type=submit]{width:100%;padding:12px;margin-top:8px;border:0;border-radius:8px;"
+    "background:#e8720c;color:#fff;font-size:15px;font-weight:600;cursor:pointer}"
+    "input[type=submit]:hover{background:#ff8419}"
+    ".ok{font-size:15px;color:#5fd08a}.err{font-size:15px;color:#ff6b5f}"
+    ".warn{font-size:12px;color:#e0a030;margin-top:18px}"
+    "</style></head><body><div class='card'>") + inner + "</div></body></html>";
+}
 
 void handleUpdatePage() {
-  String page =
-    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
-    "<title>TinyMaker firmware update</title></head><body style='font-family:sans-serif'>"
-    "<h2>TinyMaker firmware update</h2><p>Current version: ";
+  String inner =
+    "<h1>TinyMaker</h1><div class='sub'>Firmware update page</div><div class='ver'>Current version: ";
 #ifdef FIRMWARE_VERSION
-  page += FIRMWARE_VERSION;
+  inner += FIRMWARE_VERSION;
 #else
-  page += "unknown";
+  inner += "unknown";
 #endif
-  page +=
-    "</p><p>Get <b>firmware.bin</b> from "
-    "<a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>.</p>"
+  inner += "</div>";
+
+  // Only offer the upload form while the printer is in the Update menu.
+  if (!otaMenuOpen()) {
+    inner +=
+      "<div class='hint'>For safety, firmware updates are only accepted while "
+      "the printer is on the <b>System &rarr; Update</b> screen.</div>"
+      "<div class='hint'>Open that screen on the printer, then reload this page.</div>";
+    server.send(200, "text/html", otaStyledPage(inner));
+    return;
+  }
+
+  inner +=
+    "<div class='hint'>Get <b>firmware.bin</b> from "
+    "<a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a></div>"
     "<form method='POST' action='/update' enctype='multipart/form-data'>"
-    "<input type='file' name='firmware' accept='.bin' required> "
-    "<input type='submit' value='Update'></form>"
-    "<p><b>Do not power off the printer during the update.</b></p></body></html>";
-  server.send(200, "text/html", page);
+    "<input type='file' name='firmware' accept='.bin' required>"
+    "<input type='submit' value='Update firmware'></form>"
+    "<div class='warn'>Do not power off during the update</div>";
+  server.send(200, "text/html", otaStyledPage(inner));
 }
 
 void handleUpdateUpload() {
@@ -336,6 +386,13 @@ void handleUpdateUpload() {
   if (up.status == UPLOAD_FILE_START) {
     otaWebOk = false;
     otaShownBytes = 0;
+    // Latch the decision once, at the start: reject a flash requested while
+    // the printer is not on the Update screen (see handleUpdateFinish).
+    otaBlocked = !otaMenuOpen();
+    if (otaBlocked) {
+      DBGLN("Web OTA rejected: not in Update menu");
+      return;
+    }
     DBG("Web OTA start: %s\n", up.filename.c_str());
     netMessage("Firmware update", "Receiving...");
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
@@ -343,6 +400,7 @@ void handleUpdateUpload() {
     }
   }
   else if (up.status == UPLOAD_FILE_WRITE) {
+    if (otaBlocked) return;
     Update.write(up.buf, up.currentSize);
     if (up.totalSize - otaShownBytes >= 131072) { // redraw every 128 KB
       otaShownBytes = up.totalSize;
@@ -351,26 +409,113 @@ void handleUpdateUpload() {
     }
   }
   else if (up.status == UPLOAD_FILE_END) {
+    if (otaBlocked) return;
     if (Update.end(true)) otaWebOk = true;
     DBG("Web OTA end: %u bytes, ok=%d\n", up.totalSize, otaWebOk);
   }
   else if (up.status == UPLOAD_FILE_ABORTED) {
-    Update.abort();
+    if (!otaBlocked) Update.abort();
   }
 }
 
 void handleUpdateFinish() {
+  if (otaBlocked) {
+    otaBlocked = false;
+    server.send(403, "text/html", otaStyledPage(
+      "<h1>TinyMaker</h1><div class='err'>Update blocked</div>"
+      "<div class='hint'>Open <b>System &rarr; Update</b> on the printer, then try again.</div>"));
+    return;
+  }
   if (otaWebOk) {
-    server.send(200, "text/html",
-      "<html><body><h3>Update OK - printer is rebooting...</h3></body></html>");
+    server.send(200, "text/html", otaStyledPage(
+      "<h1>TinyMaker</h1><div class='ok'>Update OK</div>"
+      "<div class='hint'>The printer is rebooting&hellip;</div>"));
     netMessage("Update OK", "Restarting...");
     delay(800);
     ESP.restart();
   } else {
-    server.send(500, "text/html",
-      "<html><body><h3>Update FAILED</h3><p>Check the firmware.bin file and try again.</p></body></html>");
+    server.send(500, "text/html", otaStyledPage(
+      "<h1>TinyMaker</h1><div class='err'>Update FAILED</div>"
+      "<div class='hint'>Check the firmware.bin file and try again.</div>"));
     netMessage("Update FAILED", "");
     delay(1500);
+    screen1();
+  }
+}
+
+// ===================================================================================
+// Self-update: check GitHub Pages for a newer firmware and pull-and-flash it.
+// version.txt is two lines: latest version + direct firmware.bin URL.
+// Called only from the Update screen (screen 421) - same safety gate as /update.
+// ===================================================================================
+String otaLatestVer = "";   // latest version parsed from version.txt
+String otaBinUrl    = "";   // direct URL of the latest firmware.bin
+// State of the last check: 0=unknown, 1=checking, 2=up-to-date, 3=update available, 4=error
+int otaState = 0;
+
+// Compare two "MAJOR.MINOR.PATCH" strings. >0 if a>b, <0 if a<b, 0 if equal.
+static int cmpSemver(const char *a, const char *b) {
+  int va[3] = {0, 0, 0}, vb[3] = {0, 0, 0};
+  sscanf(a, "%d.%d.%d", &va[0], &va[1], &va[2]);
+  sscanf(b, "%d.%d.%d", &vb[0], &vb[1], &vb[2]);
+  for (int i = 0; i < 3; i++) if (va[i] != vb[i]) return va[i] - vb[i];
+  return 0;
+}
+
+// Fetch version.txt over HTTPS and work out whether an update is available.
+// Blocking (a few seconds); the caller should show "checking..." first.
+void otaCheckLatest() {
+  otaState = 1;
+  otaLatestVer = "";
+  otaBinUrl = "";
+  if (WiFi.status() != WL_CONNECTED) { otaState = 4; return; }
+
+  WiFiClientSecure client;
+  client.setInsecure();            // home LAN: skip cert validation
+  HTTPClient https;
+  https.setConnectTimeout(6000);
+  https.setTimeout(6000);
+  if (!https.begin(client, OTA_VERSION_URL)) { otaState = 4; return; }
+
+  int code = https.GET();
+  if (code == HTTP_CODE_OK) {
+    String body = https.getString();
+    int nl = body.indexOf('\n');
+    if (nl < 0) {
+      otaLatestVer = body;
+      otaLatestVer.trim();
+    } else {
+      otaLatestVer = body.substring(0, nl);      otaLatestVer.trim();
+      otaBinUrl    = body.substring(nl + 1);      otaBinUrl.trim();
+    }
+#ifdef FIRMWARE_VERSION
+    int c = cmpSemver(otaLatestVer.c_str(), FIRMWARE_VERSION);
+#else
+    int c = 1;
+#endif
+    otaState = (c > 0) ? 3 : 2;    // newer available vs. already current
+  } else {
+    otaState = 4;
+  }
+  https.end();
+}
+
+const char *otaLatestVerStr() { return otaLatestVer.c_str(); }
+int  otaVersionState()        { return otaState; }
+bool otaHasUpdate()           { return otaState == 3 && otaBinUrl.length() > 0; }
+
+// Download the latest firmware.bin and flash it. Reboots on success.
+void otaInstallLatest() {
+  if (!otaHasUpdate()) return;
+  netProgressStart("Updating...", "");
+  WiFiClientSecure client;
+  client.setInsecure();
+  httpUpdate.rebootOnUpdate(true);
+  httpUpdate.onProgress([](int done, int total) { netProgressBar(done, total); });
+  t_httpUpdate_return ret = httpUpdate.update(client, otaBinUrl);
+  if (ret == HTTP_UPDATE_FAILED) {   // on success the ESP reboots itself
+    netMessage("Update FAILED", httpUpdate.getLastErrorString().c_str());
+    delay(1800);
     screen1();
   }
 }
@@ -523,7 +668,9 @@ void network_setup() {
 // ===================================================================================
 void network_loop() {
   server.handleClient();
-  ArduinoOTA.handle();
+  // Dev espota OTA is answered only while the printer is on the Update screen
+  // (same safety gate as the web /update flasher).
+  if (otaMenuOpen()) ArduinoOTA.handle();
 
   // Live refresh of the WiFi info screen (312): redraw values every 2 s
   // while the screen is open. 'screen' global is defined in the main .ino
@@ -575,7 +722,7 @@ void wifiInfoValues() {
 void screenWifiInfo() {
   gfx2->fillScreen(BLACK);
   gfx2->setFont(&FreeSans8pt7b);
-  gfx2->setTextColor(WHITE);
+  gfx2->setTextColor(ORANGE);   // orange title, matching About / Update
   gfx2->setTextSize(1);
   gfx2->setCursor(5, 15);
   if (WiFi.status() == WL_CONNECTED) {
@@ -584,7 +731,7 @@ void screenWifiInfo() {
   } else {
     gfx2->print("WiFi: Offline");
   }
-  wifiInfoValues();
+  wifiInfoValues();   // resets color to WHITE for the values below
   gfx2->setCursor(5, 74);
   gfx2->print("FW ");
 #ifdef FIRMWARE_VERSION

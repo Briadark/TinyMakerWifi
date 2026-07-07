@@ -11,9 +11,10 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * Automatic unpacking of uploaded `.sl1` / `.zip` files into the layer format the stock firmware expects (works with both PrusaSlicer and UVtools numbering)
 * New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), firmware Update info, About
 * WiFi status indicator (green/grey dot) on the main menu
-* **Model deletion from the printer** — long-press OK on a model in the Print menu *(since v1.0.2-wifi-0.5)*
-* **WiFi reset** — from the System menu, or by holding the BACK button while powering on *(since v1.0.2-wifi-0.5)*
-* **OTA updates** — firmware update over WiFi: browser page at `/update` + PlatformIO OTA for developers *(since v1.0.2-wifi-0.4)*
+* **Model deletion from the printer** — long-press OK on a model in the Print menu
+* **Resin usage estimate** — press UP on the print preview to estimate the resin (ml) a model needs; live ml is shown while printing
+* **WiFi reset** — from the System menu, or by holding the BACK button while powering on
+* **Firmware updates over WiFi** — self-update straight from the printer (System → Update shows installed vs latest, one-button install), browser upload for a specific/older version, and PlatformIO OTA for developers. Flashing is gated to the Update menu for safety.
 * Everything is optional: build switches let you compile the original, network-free firmware from the same code base
 
 ## Hardware
@@ -105,8 +106,17 @@ In the **Print** menu, **press and hold OK for ~2.5 seconds** on a model — a *
 
 *(since v1.0.2-wifi-0.4)*
 
-* **From a browser:** download `firmware.bin` from [Releases](https://github.com/slibbinas/TinyMakerWifi/releases), open `http://tinymaker.local/update`, select the file, press Update. Do not power off during the update — and don't worry too much either: the dual OTA partition keeps the previous firmware if the update fails.
-* **For developers:** PlatformIO OTA — select the `env:tinymaker-ota` environment and Upload goes over WiFi.
+> 🔒 **For safety, firmware flashing is only accepted while the printer is on the `System → Update` screen.** Open that screen on the printer first, then start the update. This prevents anyone else on the network from silently re-flashing the printer. (Model upload from PrusaSlicer is not affected — it works any time.)
+
+The `System → Update` screen shows the **installed** version and checks GitHub for the **latest**. From there you have two options:
+
+* **Install (self-update, no computer):** if a newer version is available, the `Install` button lights up. Press **OK** — the printer downloads and flashes the latest firmware itself over WiFi. Nothing else needed.
+* **Install from file (browser — any/older version):** on the Update screen press **UP (`Local`)** to open the *Install from file* screen, which shows the address `http://<printer-ip>/update`. Open it in a browser, pick a `firmware.bin` you downloaded from [Releases](https://github.com/slibbinas/TinyMakerWifi/releases), and upload it. Use this to install a **specific or older** version, or a local build.
+* **For developers:** PlatformIO OTA — open `System → Update` on the printer, then select the `env:tinymaker-ota` environment and Upload goes over WiFi.
+
+Do not power off during an update — and don't worry too much either: the dual OTA partition keeps the previous firmware if the update fails.
+
+> The self-update needs the latest `firmware.bin` + a `version.txt` hosted on GitHub Pages. See [`Firmware_Hosting/`](Firmware_Hosting/) for the one-time setup and per-release steps.
 
 ## Building from source
 
