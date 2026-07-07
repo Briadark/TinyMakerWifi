@@ -9,6 +9,8 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * Automatic unpacking of uploaded `.sl1` / `.zip` files into the layer format the stock firmware expects (works with both PrusaSlicer and UVtools numbering)
 * New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), firmware Update info, About
 * WiFi status indicator (green/grey dot) on the main menu
+* **Model deletion from the printer** — long-press OK on a model in the Print menu *(since v1.0.2-wifi-0.5)*
+* **WiFi reset** — from the System menu, or by holding the BACK button while powering on *(since v1.0.2-wifi-0.5)*
 * **OTA updates** — firmware update over WiFi: browser page at `/update` + PlatformIO OTA for developers *(since v1.0.2-wifi-0.4)*
 * Everything is optional: build switches let you compile the original, network-free firmware from the same code base
 
@@ -27,18 +29,26 @@ If your computer does not recognize the printer when connected via USB, install 
 ### 2. Download Tools & Firmware
 1. Locate the **`flash_download_tool.zip`** inside the `Flash_Installer` folder of this repository (or download it from the official [Espressif Flash Download Tool](https://docs.espressif.com/projects/esp-test-tools/en/latest/esp32/production_stage/tools/flash_download_tool.html) page). **Extract the ZIP archive fully before running.**
 2. Download the latest **`firmware-full.bin`** from the [Releases](https://github.com/slibbinas/TinyMakerWifi/releases) section of this repository.
-   * Note: use `firmware-full.bin` (complete image with bootloader and partition table) for this first USB flash. The smaller `firmware.bin` is for later wireless updates via `/update` only — flashing it alone over the stock firmware would leave the old partition layout and break OTA.
+
+> ⚠️ **Which file do I need?** Releases contain two files and they are NOT interchangeable:
+>
+> | File | Used for | How |
+> |---|---|---|
+> | **`firmware-full.bin`** | **First-time USB flashing** (this section) | Flash Download Tool, address **`0x0`** |
+> | `firmware.bin` | Wireless updates **only**, after this firmware is already installed | Browser, `http://tinymaker.local/update` |
+>
+> Flashing `firmware.bin` over USB will **not** work correctly: it lacks the bootloader and partition table, so the printer either won't boot (if flashed at `0x0`) or OTA updates will be broken (if flashed at `0x10000` over the stock firmware).
 
 ### 3. Flashing Steps
 1. Run the extracted `flash_download_tool_xxx.exe`.
 2. In the "Download Tool" window, select **ESP32** and **Develop** mode.
-3. Configure the settings as follows:
+3. Configure the settings **exactly** as follows (wrong settings are the most common cause of a non-booting printer):
     * **SPI Speed:** 40 MHz
     * **SPI Mode:** DIO
     * **Flash Size:** 32 Mbit (4MB)
-4. Click on the three dots `...` next to the first row and select your downloaded `firmware-full.bin` file.
-5. In the address field next to the file, enter: **`0x0`**.
-6. Ensure the checkbox on the left of the file path is **checked**.
+4. Click on the three dots `...` next to the first row and select your downloaded **`firmware-full.bin`** file (not `firmware.bin`!).
+5. In the address field next to the file, enter: **`0x0`** (zero — not `0x10000`).
+6. Ensure the checkbox on the left of the file path is **checked** — without it the tool flashes nothing and still reports success.
 7. Select the correct **COM port** for your printer.
 8. Click **START**.
 9. Once the progress bar reaches 100% and says "FINISH", power cycle your printer.
@@ -52,7 +62,14 @@ Note: the first boot after flashing may take a few seconds longer than usual, an
 3. Select your home WiFi network and enter the password.
 4. The printer connects and briefly shows its IP address; credentials are stored, so next boots connect automatically (~5 s). If the saved network is unreachable, the printer simply boots in offline mode after 15 s — printing from SD works as always.
 
-WiFi status, signal strength and IP are always visible under **System → WiFi Info**, where you can also reset the stored credentials.
+WiFi status, signal strength and IP are always visible under **System → WiFi Info**.
+
+### Resetting WiFi
+
+Two ways to erase the stored credentials (e.g. when moving the printer to another network):
+
+* **From the menu:** System → WiFi Info → press OK → confirm. The printer erases the credentials, reboots and starts the `TinyMaker-Setup` portal again.
+* **Emergency reset:** hold the **BACK** button while powering the printer on. Use this if the printer keeps trying to connect to an old network and you can't reach the menu in time.
 
 ## PrusaSlicer setup
 
@@ -66,6 +83,10 @@ WiFi status, signal strength and IP are always visible under **System → WiFi I
 4. Slice and press **Send to printer**. The printer shows *Receiving → Unpacking → Model ready*, and the model appears in the **Print** menu.
 
 **Always slice with the 0.05 mm profile.** The firmware is designed for 0.05 mm source layers (when the printer is set to 0.10 mm it skips every other image). Maximum model size: 1200 layers = 60 mm.
+
+## Deleting uploaded models
+
+In the **Print** menu, **press and hold OK for ~2.5 seconds** on a model — a *Delete model?* confirmation appears (release the button first, then OK = delete, Back = cancel). Deletion removes the whole model folder from the SD card and shows a progress bar (large models take a while — hundreds of layer files). A short OK press starts printing as usual.
 
 ## Wireless Firmware Updates
 

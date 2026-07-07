@@ -280,6 +280,11 @@ void loop() {
       case 11:
       screen1();       
         break;
+      case 113:                 // cancel delete -> back to model list
+      screen11();
+      counter --;
+      folderDown(root);
+        break;
       case 111:
       screen11();
       counter --;
@@ -567,7 +572,22 @@ void loop() {
         screen12();
       }
         break;
+      case 113:                 // delete confirmed
+        deleteSelectedModel();
+        break;
       case 11: {
+      // Long-press OK (>= 2.5 s) on a model -> delete confirmation
+      {
+        unsigned long okHold = millis();
+        while (digitalRead(buttonOK) == LOW && millis() - okHold < 2500) delay(10);
+        if (millis() - okHold >= 2500 && strlen(foldersel_long) > 0) {
+          screenDeleteConfirm();
+          // Wait for button release - otherwise the still-held OK would be
+          // read again on the next loop() pass and instantly confirm delete
+          while (digitalRead(buttonOK) == LOW) delay(10);
+          break;
+        }
+      }
       gfx2->fillScreen(BLACK);
       gfx2->fillRoundRect(0, 0, 160, 80, 5, ORANGE);
       gfx2->fillRoundRect(2, 2, 156, 76, 3, BLACK); 

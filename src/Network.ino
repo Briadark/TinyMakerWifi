@@ -37,8 +37,11 @@
 #include <unzipLIB.h>      // bitbank2
 #include <Update.h>        // web /update firmware flashing
 #include <ArduinoOTA.h>    // PlatformIO espota uploads
+#include <esp_wifi.h>      // esp_wifi_restore() for reliable credential erase
+#include <Preferences.h>   // forcePortal flag (survives reboot)
 
 WebServer server(80);
+Preferences netPrefs;
 // NOTE: no global 'UNZIP zip;' here! The UNZIP object is ~40 KB - declared
 // globally it lands in static .bss and overflows WROOM's DRAM segment
 // (verified: "region dram0_0_seg overflowed"). It is heap-allocated inside
@@ -391,8 +394,20 @@ void drawWifiBadge() {
 }
 
 void network_setup() {
+  // One-shot flag set by wifiDoReset() (menu: System -> WiFi Info -> OK)
+  netPrefs.begin("tinymaker", false);
+  bool forcePortal = netPrefs.getBool("forcePortal", false);
+  if (forcePortal) netPrefs.putBool("forcePortal", false);
+  netPrefs.end();
+
+  // Emergency WiFi reset: hold BACK button while powering the printer on
+  if (digitalRead(buttonBack) == LOW) {
+    wifiEraseCredentials();
+    forcePortal = true;
+  }
+
   WiFiManager wm;
-  bool saved = wm.getWiFiIsSaved();
+  bool saved = wm.getWiFiIsSaved() && !forcePortal;
 
   if (saved) {
     // Credentials stored in NVS: try to connect ourselves with a visible
@@ -572,12 +587,28 @@ void screenWifiResetConfirm() {
   screen = 3121;
 }
 
+// Robust credential erase. NOTE (verified on hardware): WiFiManager's
+// resetSettings() alone is UNRELIABLE on Arduino core 2.0.x - the NVS
+// entry sometimes survives and getWiFiIsSaved() stays true after reboot.
+void wifiEraseCredentials() {
+  WiFi.mode(WIFI_STA);
+  WiFi.persistent(true);
+  WiFi.disconnect(true, true);  // wifioff = true, eraseap = true
+  WiFi.persistent(false);
+  delay(100);
+  esp_wifi_restore();           // second hammer: restore driver defaults in NVS
+}
+
 // Erase stored credentials and reboot -> captive portal on next boot
 void wifiDoReset() {
   netMessage("WiFi reset...", "Restarting");
-  WiFiManager wm;
-  wm.resetSettings();
-  delay(500);
+  wifiEraseCredentials();
+  // Belt and braces: one-shot flag forces the config portal on next boot
+  // even if the NVS erase above misbehaved
+  netPrefs.begin("tinymaker", false);
+  netPrefs.putBool("forcePortal", true);
+  netPrefs.end();
+  delay(400);
   ESP.restart();
 }
 
