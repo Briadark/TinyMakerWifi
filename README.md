@@ -18,7 +18,7 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 
 Stock TinyMaker electronics — **ESP32-WROOM-32E-N4** (4 MB flash, no PSRAM). No hardware modifications required; WiFi is already on the module.
 
-## Initial Firmware Installation
+## Initial Firmware Installation (NOT VERIFIED - STILL IN TESTING !!!)
 
 If you are installing this firmware for the first time, you need to flash it via USB. After this one-time step, all future updates can be done wirelessly via your browser.
 
