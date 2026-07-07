@@ -50,6 +50,10 @@
 #include <ESPmDNS.h>
 #include <WebServer.h>
 #include <unzipLIB.h>      // bitbank2
+#include <Update.h>        // web /update firmware flashing
+#include <ArduinoOTA.h>    // PlatformIO espota uploads
+#include <esp_wifi.h>      // reliable WiFi credential erase / config read
+#include <Preferences.h>   // forcePortal flag (survives reboot)
 #endif
 
 // ===================================================================================

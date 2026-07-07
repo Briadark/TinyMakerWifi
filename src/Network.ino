@@ -52,6 +52,7 @@ File uploadFile;
 String uploadPath;      // e.g. "/Benchy.sl1"
 String modelName;       // e.g. "Benchy"
 bool uploadOk = false;
+unsigned long otaShownBytes = 0;   // progress counter (upload + web OTA)
 
 // Separate File handle for the unzipper - do NOT reuse the global
 // 'myfile' from PNG.ino (it belongs to the PNGdec callbacks).
@@ -247,13 +248,23 @@ void handleUploadData() {
     modelName = safeModelName(up.filename);
     uploadPath = "/" + modelName + ".zip";
     uploadOk = false;
+    otaShownBytes = 0;
     SD.remove(uploadPath.c_str());
     uploadFile = SD.open(uploadPath.c_str(), FILE_WRITE);
     DBG("Upload start: %s\n", uploadPath.c_str());
-    netMessage("Receiving model:", modelName.c_str());
+    // Same style as WiFi/delete/OTA: title + a sweeping progress bar.
+    // Multipart uploads don't announce total size, so the bar animates by
+    // wrapping every ~1 MB while showing the running KB count.
+    netProgressStart("Receiving model:", modelName.c_str());
   }
   else if (up.status == UPLOAD_FILE_WRITE) {
     if (uploadFile) uploadFile.write(up.buf, up.currentSize);
+    if (up.totalSize - otaShownBytes >= 65536) { // redraw every 64 KB
+      otaShownBytes = up.totalSize;
+      int w = (int)((up.totalSize % 1048576L) * 136L / 1048576L); // wraps each 1 MB
+      gfx2->fillRect(12, 50, 136, 12, BLACK);
+      gfx2->fillRect(12, 50, w, 12, ORANGE);
+    }
   }
   else if (up.status == UPLOAD_FILE_END) {
     if (uploadFile) { uploadFile.close(); uploadOk = true; }
@@ -299,7 +310,6 @@ void finishUpload() {
 // Runs only from loop() -> physically impossible during printing.
 // ===================================================================================
 bool otaWebOk = false;
-unsigned long otaShownBytes = 0;
 
 void handleUpdatePage() {
   String page =
@@ -407,7 +417,19 @@ void network_setup() {
   }
 
   WiFiManager wm;
-  bool saved = wm.getWiFiIsSaved() && !forcePortal;
+
+  // esp_wifi must be initialized before reading its config
+  WiFi.mode(WIFI_STA);
+
+  // Reliable "do we have credentials?" check. getWiFiIsSaved() is NOT
+  // trustworthy right after a fresh full flash (uninitialized NVS can read
+  // back as "saved" -> printer tries to connect to nothing and never starts
+  // the AP; reported by a user on v0.5). Instead read the SSID straight from
+  // the esp_wifi config and treat empty SSID as "no credentials".
+  wifi_config_t conf;
+  esp_wifi_get_config(WIFI_IF_STA, &conf);
+  bool hasSSID = strlen((const char*)conf.sta.ssid) > 0;
+  bool saved = hasSSID && !forcePortal;
 
   if (saved) {
     // Credentials stored in NVS: try to connect ourselves with a visible
