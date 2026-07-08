@@ -28,14 +28,30 @@ bool listEntryValid(File &entry) {
 /**
  * @brief Draw the currently selected list entry into the Select File box.
  * Archives are drawn in blue (import), model folders in white (print).
+ * Names are trimmed by pixel width to fit the box; for archives the
+ * ".sl1"/".zip" extension always stays visible (only the base is trimmed).
  */
 void drawListSelection() {
-  foldersel = String(foldersel_long);
-  foldersel = foldersel.substring(0, 10);
-  gfx2->fillRoundRect(7, 28, 137, 22, 2, BLACK);
+  String name = String(foldersel_long);
   gfx2->setFont(&FreeSans8pt7b);
-  gfx2->setTextColor(selIsArchive ? 0x879F : WHITE);
   gfx2->setTextSize(1);
+  if (selIsArchive) {
+    int dot = name.lastIndexOf('.');
+    String base = name.substring(0, dot);
+    String ext = name.substring(dot);          // ".sl1" / ".zip"
+    foldersel = base + ext;
+    while (base.length() > 1) {
+      int16_t bx, by; uint16_t bw, bh;
+      gfx2->getTextBounds(foldersel.c_str(), 0, 0, &bx, &by, &bw, &bh);
+      if ((int)bw <= 128) break;               // fits the 137px box
+      base.remove(base.length() - 1);
+      foldersel = base + ext;
+    }
+  } else {
+    foldersel = uiFitText(name, 128);
+  }
+  gfx2->fillRoundRect(7, 28, 137, 22, 2, BLACK);
+  gfx2->setTextColor(selIsArchive ? 0x879F : WHITE);
   gfx2->setCursor(12, 43);
   gfx2->print(foldersel);
   gfx2->setTextColor(WHITE);
@@ -157,7 +173,9 @@ void screenDeleteConfirm(){
   gfx2->setCursor(8, 44);
   gfx2->print(foldersel);
   gfx2->setTextColor(WHITE);
-  uiButtons("Back", "Delete", RED);   // Back = No, OK = Delete
+  // Button colors match the physical buttons (blue = OK, orange = Back);
+  // the red frame alone signals the destructive action.
+  uiButtons("Back", "Delete", 0x879F);
   screen = 113;
 }
 

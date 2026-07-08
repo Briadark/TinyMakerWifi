@@ -57,6 +57,17 @@ void uiActionHint(int x, int y, const char *label) {
   gfx2->setFont(&FreeSans8pt7b);
 }
 
+// Trim a string by pixel width (in the current font) to fit maxW pixels.
+String uiFitText(String s, int maxW) {
+  int16_t bx, by; uint16_t bw, bh;
+  while (s.length() > 1) {
+    gfx2->getTextBounds(s.c_str(), 0, 0, &bx, &by, &bw, &bh);
+    if ((int)bw <= maxW) break;
+    s.remove(s.length() - 1);
+  }
+  return s;
+}
+
 // Framed two-line status message (used by upload/OTA/import flows)
 void netMessage(const char *line1, const char *line2) {
   uiFrame(ORANGE);
@@ -164,7 +175,7 @@ void screen1(){
   gfx2->fillRect(122, 43, 37, 15, BLACK);
   gfx2->fillCircle(140, 42, 2, ORANGE);
 
-  gfx2->drawRoundRect(0, 10, 40, 40, 5, ORANGE);
+  gfx2->drawRoundRect(0, 12, 40, 40, 5, 0x879F);
   gfx2->setFont(&FreeSans8pt7b);
   gfx2->setTextColor(WHITE);
   gfx2->setTextSize(1);
@@ -185,11 +196,11 @@ void screen1(){
  * @brief Screen 2: Main Menu - Maintenance
  */
 void screen2(){
-  gfx2->drawRoundRect(0, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(80, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(120, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(40, 10, 40, 40, 5, ORANGE);
-  gfx2->fillRect(0, 50, 160, 30, BLACK);
+  gfx2->drawRoundRect(0, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(80, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(120, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(40, 12, 40, 40, 5, 0x879F);
+  gfx2->fillRect(0, 52, 160, 28, BLACK);
   gfx2->setCursor(31, 71);
   gfx2->print("Maintenance");
   #if ENABLE_NETWORK
@@ -206,11 +217,11 @@ void screen2(){
  * @brief Screen 3: Main Menu - Setting
  */
 void screen3(){
-  gfx2->drawRoundRect(0, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(40, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(120, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(80, 10, 40, 40, 5, ORANGE);
-  gfx2->fillRect(0, 50, 160, 30, BLACK);
+  gfx2->drawRoundRect(0, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(40, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(120, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(80, 12, 40, 40, 5, 0x879F);
+  gfx2->fillRect(0, 52, 160, 28, BLACK);
   gfx2->setCursor(51, 71);
   gfx2->print("Settings");
   #if ENABLE_NETWORK
@@ -222,11 +233,11 @@ void screen3(){
  * @brief Screen 4: Main Menu - System
  */
 void screen4(){
-  gfx2->drawRoundRect(0, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(40, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(80, 10, 40, 40, 5, BLACK);
-  gfx2->drawRoundRect(120, 10, 40, 40, 5, ORANGE);
-  gfx2->fillRect(0, 50, 160, 30, BLACK);
+  gfx2->drawRoundRect(0, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(40, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(80, 12, 40, 40, 5, BLACK);
+  gfx2->drawRoundRect(120, 12, 40, 40, 5, 0x879F);
+  gfx2->fillRect(0, 52, 160, 28, BLACK);
   gfx2->setCursor(53, 71);
   gfx2->print("System");
   #if ENABLE_NETWORK
@@ -394,24 +405,31 @@ void screen431(){
   uiTitle("TinyMaker WiFi");
   gfx2->setFont(NULL); // built-in small font for long lines
   gfx2->setTextColor(WHITE);
-  gfx2->setCursor(5, 26);
+  // Info block (11 px pitch), wider gap before the repo block; key labels
+  // in blue for quick scanning
+  gfx2->setCursor(5, 24);
+  gfx2->setTextColor(0x879F);
+  gfx2->print("FW: ");
+  gfx2->setTextColor(WHITE);
 #ifdef FIRMWARE_VERSION
-  gfx2->print("FW: v");
+  gfx2->print("v");
   gfx2->print(FIRMWARE_VERSION);
 #else
-  gfx2->print("FW: v?");
+  gfx2->print("v?");
 #endif
-  gfx2->setCursor(5, 36);
+  gfx2->setCursor(5, 35);
   gfx2->print("Based on TinyMaker 1.0.2");
   gfx2->setCursor(5, 46);
+  gfx2->setTextColor(0x879F);
   gfx2->print("Printed: ");
+  gfx2->setTextColor(WHITE);
   gfx2->print(totalPrintSecs / 3600UL);
   gfx2->print("h ");
   gfx2->print((totalPrintSecs % 3600UL) / 60UL);
   gfx2->print("m");
-  gfx2->setCursor(5, 56);
+  gfx2->setCursor(5, 60);
   gfx2->print("github.com/slibbinas/");
-  gfx2->setCursor(5, 66);
+  gfx2->setCursor(5, 71);
   gfx2->print("TinyMakerWifi");
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
   screen = 431;
@@ -588,9 +606,9 @@ void screen1111(){
   gfx2->setFont(&FreeSans8pt7b);
   gfx2->setTextColor(WHITE);
   gfx2->setTextSize(1);
-  gfx2->setCursor(6, 34);    
+  gfx2->setCursor(6, 34);
   gfx2->setTextColor(WHITE);
-  gfx2->print(foldersel);    
+  gfx2->print(uiFitText(foldersel, 106));   // narrower box than the file list
   gfx2->setCursor(6, 54);
   gfx2->print(current_layer);
   gfx2->print(" / ");

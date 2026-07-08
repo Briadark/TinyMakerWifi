@@ -359,6 +359,8 @@ void otaInstallLatest() {
 // from the screen edge so it does not blend into screen frames.
 // Called from screen1/2/3 and refreshed periodically from network_loop().
 void drawWifiBadge() {
+  // Bars end at y10; the menu boxes start at y12 (lowered 2 px), so a clear
+  // row (y11) always separates the badge from the System-box outline.
   uint16_t c = (WiFi.status() == WL_CONNECTED) ? GREEN : DARKGREY;
   gfx2->fillRect(148, 8, 2, 3, c);   // short bar
   gfx2->fillRect(151, 5, 2, 6, c);   // medium bar
