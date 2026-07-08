@@ -104,6 +104,12 @@ Two ways to erase the stored credentials (e.g. when moving the printer to anothe
 3. Click **Test** — it should report a successful connection (printer must be on and connected to WiFi).
 4. Slice and press **Send to printer**. The printer shows *Receiving → Unpacking → Model ready*, and the model appears in the **Print** menu.
 
+<p>
+  <img src="Images/mockups/prusaslicer-physical-printer.png" width="440" alt="PrusaSlicer: add a physical printer pointing at tinymaker.local with API key auth">
+  &nbsp;
+  <img src="Images/mockups/prusaslicer-send-to-printer.png" width="300" alt="PrusaSlicer: select the TinyMaker WiFi printer and press Send to printer">
+</p>
+
 **Always slice with the 0.05 mm profile.** The firmware is designed for 0.05 mm source layers (when the printer is set to 0.10 mm it skips every other image). Maximum model size: 1200 layers = 60 mm.
 
 ## Deleting uploaded models
