@@ -7,3 +7,6 @@
 .vscode/ipch
 *.code-workspace
 compile_commands.json
+
+# Local, private Claude skills (kept out of the public repo; backup: secret gist)
+.claude/skills/
