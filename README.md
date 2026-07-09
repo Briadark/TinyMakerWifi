@@ -16,6 +16,8 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * **Lifetime print-hours counter** — the About screen shows total printing time (stored in NVS, survives firmware updates)
 * **Resin usage estimate** — press UP on the print preview to estimate the resin (ml) a model needs; live ml is shown while printing
 * **WiFi reset** — from the System menu, or by holding the BACK button while powering on
+* **Web dashboard** — open the printer's IP in a browser: SD manager (upload/delete/start), live print status with pause/resume/stop, device config and a dry-run test mode *(contributed by [@Briadark](https://github.com/Briadark))*
+* **MQTT / Home Assistant** — optional integration with auto-discovery: print state, layers, resin, run/remaining time as HA sensors
 * **Firmware updates over WiFi** — self-update straight from the printer (System → Update shows installed vs latest, one-button install), browser upload for a specific/older version, and PlatformIO OTA for developers. Flashing is gated to the Update menu for safety.
 * Everything is optional: build switches let you compile the original, network-free firmware from the same code base
 
