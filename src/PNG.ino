@@ -151,9 +151,11 @@ bool estimateResin(){
   gfx2->setCursor(12, 22);
   gfx2->print("Resin needed");
   gfx2->setTextColor(0x879F);
-  gfx2->setCursor(12, 44);
+  gfx2->setCursor(8, 44);
   gfx2->print(resinEstimateMl, 1);
-  gfx2->print(" ml");
+  gfx2->print(" ml = ");
+  gfx2->print(resinEstimateMl / (double)Vat_Capacity_Ml, 1);
+  gfx2->print(" VAT");
   gfx2->setTextColor(WHITE);
   uiButtons("Back", "Start", 0x879F);
 

@@ -14,7 +14,7 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * **Model deletion from the printer** — long-press OK on a model in the Print menu
 * **Import from SD card** — copy an `.sl1`/`.zip` onto the card and it shows up in the Print menu (in blue); press OK to convert it into a printable model. Works without any network, the archive is removed after a successful import
 * **Lifetime print-hours counter** — the About screen shows total printing time (stored in NVS, survives firmware updates)
-* **Resin usage estimate** — press UP on the print preview to estimate the resin (ml) a model needs; live ml is shown while printing
+* **Resin usage estimate** — press UP on the print preview to estimate the resin a model needs — shown in ml AND in vat fills (e.g. `12.4 ml = 0.8 VAT`; vat size adjustable 10–40 ml in Settings, default 15). Live ml is shown while printing
 * **WiFi reset** — from the System menu, or by holding the BACK button while powering on
 * **Web dashboard** — open the printer's IP in a browser: SD manager (upload/delete/start), live print status with pause/resume/stop, device config and a dry-run test mode *(contributed by [@Briadark](https://github.com/Briadark))*
 * **MQTT / Home Assistant** — optional integration with auto-discovery: print state, layers, resin, run/remaining time as HA sensors

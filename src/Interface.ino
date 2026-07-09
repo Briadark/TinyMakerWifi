@@ -1682,10 +1682,26 @@ void screen31UP(){
       gfx2->print(" "); 
       gfx2->print("mm/min");  
       gfx2->setCursor(5, 56);
-      gfx2->println("Back to Default");     
+      gfx2->println("VAT size");
+      gfx2->setCursor(5, 74);
+      gfx2->print(Vat_Capacity_Ml);
+      gfx2->print(" ");
+      gfx2->print("ml");
       gfx2->drawRoundRect(0, 41, 160, 39, 3, BLACK);
       gfx2->drawRoundRect(0, 0, 160, 39, 3, WHITE); 
-        break;     
+        break;
+      case 11:
+      gfx2->setCursor(5, 15);
+      gfx2->println("VAT size");
+      gfx2->setCursor(5, 33);
+      gfx2->print(Vat_Capacity_Ml);
+      gfx2->print(" ");
+      gfx2->print("ml");
+      gfx2->setCursor(5, 56);
+      gfx2->println("Back to Default");
+      gfx2->drawRoundRect(0, 41, 160, 39, 3, BLACK);
+      gfx2->drawRoundRect(0, 0, 160, 39, 3, WHITE);
+        break;
     }
   }
   else{
@@ -1723,7 +1739,7 @@ void screen31UP(){
  * Navigates down through the settings list.
  */
 void screen31DOWN(){
-  if (setting_item < 11) {
+  if (setting_item < 12) {
     setting_item ++;
     gfx2->fillScreen(BLACK);
     gfx2->setFont(&FreeSans8pt7b);
@@ -1874,10 +1890,26 @@ void screen31DOWN(){
       gfx2->print(" "); 
       gfx2->print("mm/min");  
       gfx2->setCursor(5, 56);
-      gfx2->println("Back to Default");     
+      gfx2->println("VAT size");
+      gfx2->setCursor(5, 74);
+      gfx2->print(Vat_Capacity_Ml);
+      gfx2->print(" ");
+      gfx2->print("ml");
       gfx2->drawRoundRect(0, 41, 160, 39, 3, WHITE);
       gfx2->drawRoundRect(0, 0, 160, 39, 3, BLACK); 
-        break;     
+        break;
+      case 12:
+      gfx2->setCursor(5, 15);
+      gfx2->println("VAT size");
+      gfx2->setCursor(5, 33);
+      gfx2->print(Vat_Capacity_Ml);
+      gfx2->print(" ");
+      gfx2->print("ml");
+      gfx2->setCursor(5, 56);
+      gfx2->println("Back to Default");
+      gfx2->drawRoundRect(0, 41, 160, 39, 3, WHITE);
+      gfx2->drawRoundRect(0, 0, 160, 39, 3, BLACK); 
+        break;
     }
   }
   else{
@@ -1915,8 +1947,8 @@ void screen311(){
     gfx2->fillTriangle(151, 33, 148, 30, 154, 30, WHITE);
     screen = 311;  
   }
-  if (setting_item_updown == 0 || setting_item == 11) {
-    if(setting_item != 11){
+  if (setting_item_updown == 0 || setting_item == 12) {
+    if(setting_item != 12){
       // Bottom Option Selected
       gfx2->fillTriangle(151, 61, 148, 64, 154, 64, WHITE); 
       gfx2->fillTriangle(151, 74, 148, 71, 154, 71, WHITE); 
@@ -1927,7 +1959,7 @@ void screen311(){
       // (shared with setup(); defined in TinyMaker.ino)
       resetSettingsToDefault();
 
-      setting_item = 10;
+      setting_item = 11;
       screen31DOWN(); // Refresh Screen
     }
   }
@@ -2044,6 +2076,16 @@ void screen3111increase(){
         gfx2->print("mm/min");
       }
         break;
+      case 11:
+      if(Vat_Capacity_Ml < 40){
+        Vat_Capacity_Ml ++;
+        gfx2->fillRect(3, 20, 80, 17, BLACK);
+        gfx2->setCursor(5, 33);
+        gfx2->print(Vat_Capacity_Ml);
+        gfx2->print(" ");
+        gfx2->print("ml");
+      }
+        break;
     }
   }
  
@@ -2133,6 +2175,16 @@ void screen3111increase(){
         gfx2->print(Drop_Back_Feedrate);
         gfx2->print(" "); 
         gfx2->print("mm/min");
+      }
+        break;
+      case 11:
+      if(Vat_Capacity_Ml < 40){
+        Vat_Capacity_Ml ++;
+        gfx2->fillRect(3, 61, 80, 17, BLACK);
+        gfx2->setCursor(5, 74);
+        gfx2->print(Vat_Capacity_Ml);
+        gfx2->print(" ");
+        gfx2->print("ml");
       }
         break;   
     }    
@@ -2250,6 +2302,16 @@ void screen3111decrease(){
         gfx2->print(" "); 
         gfx2->print("mm/min");
       }
+        break;
+      case 11:
+      if(Vat_Capacity_Ml > 10){
+        Vat_Capacity_Ml --;
+        gfx2->fillRect(3, 20, 80, 17, BLACK);
+        gfx2->setCursor(5, 33);
+        gfx2->print(Vat_Capacity_Ml);
+        gfx2->print(" ");
+        gfx2->print("ml");
+      }
         break;   
     }
   }
@@ -2340,6 +2402,16 @@ void screen3111decrease(){
         gfx2->print(Drop_Back_Feedrate);
         gfx2->print(" "); 
         gfx2->print("mm/min");
+      }
+        break;
+      case 11:
+      if(Vat_Capacity_Ml > 10){
+        Vat_Capacity_Ml --;
+        gfx2->fillRect(3, 61, 80, 17, BLACK);
+        gfx2->setCursor(5, 74);
+        gfx2->print(Vat_Capacity_Ml);
+        gfx2->print(" ");
+        gfx2->print("ml");
       }
         break;
     }    

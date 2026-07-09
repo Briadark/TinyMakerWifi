@@ -220,6 +220,7 @@ bool print_paused = false;    // Flag: Print is currently paused
 bool print_canceled = false;  // Flag: Print process canceled
 
 // Motion Parameters
+long Vat_Capacity_Ml = 15;  // resin vat size to the MAX mark (ml), EEPROM addr 11
 float steps_mm = 1463;     // Steps per millimeter for Z-axis
 int homing_Feedrate = 300; // Feedrate for homing
 float max_height = 68;     // Maximum build height (mm)
@@ -274,6 +275,7 @@ void savePrintSettings() {
   EEPROM.write(8, Slow_Lift_Feedrate);
   EEPROM.write(9, Fast_Lift_Feedrate);
   EEPROM.write(10, Drop_Back_Feedrate);
+  EEPROM.write(11, Vat_Capacity_Ml);
   EEPROM.commit();
 }
 
@@ -328,6 +330,7 @@ void resetSettingsToDefault() {
   EEPROM.write(8, 40);   // Slow_Lift_Feedrate
   EEPROM.write(9, 50);   // Fast_Lift_Feedrate
   EEPROM.write(10, 50);  // Drop_Back_Feedrate
+  EEPROM.write(11, 15);  // Vat_Capacity_Ml (ml to MAX mark)
   EEPROM.commit();
 
   Layer_Height = EEPROM.read(1) / 100.00;
@@ -340,6 +343,7 @@ void resetSettingsToDefault() {
   Slow_Lift_Feedrate = EEPROM.read(8);
   Fast_Lift_Feedrate = EEPROM.read(9);
   Drop_Back_Feedrate = EEPROM.read(10);
+  Vat_Capacity_Ml = EEPROM.read(11);
 }
 
 // ===================================================================================
@@ -426,6 +430,15 @@ void setup() {
   // Settings -> "Back to Default" menu uses when values are out of range.
   if (EEPROM.read(1) == 255 || Layer_Height < 0.01 || Layer_Height > 0.2) {
     resetSettingsToDefault();
+  }
+
+  // VAT capacity (added in 0.9.2 at EEPROM addr 11) - older installs have
+  // 0xFF there; clamp to the valid 10..40 ml range or seed the default.
+  Vat_Capacity_Ml = EEPROM.read(11);
+  if (Vat_Capacity_Ml < 10 || Vat_Capacity_Ml > 40) {
+    Vat_Capacity_Ml = 15;
+    EEPROM.write(11, 15);
+    EEPROM.commit();
   }
 
   // NVS-backed system values: lifetime print time + web/device settings.
