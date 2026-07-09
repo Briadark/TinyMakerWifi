@@ -343,7 +343,7 @@ String advancedLabel(int item) {
   if (item == 1) return "Screen timeout";
   if (item == 2) return "Dry run";
   if (item == 3) return "WiFi";
-  if (wifiEnabled && item == 4) return "Web access";
+  if (wifiEnabled && item == 4) return "Web control";
   if (wifiEnabled && advancedMqttConfigured() && item == 5) return "MQTT";
   return "";
 }
