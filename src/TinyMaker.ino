@@ -84,6 +84,10 @@ uint32_t totalPrintSecs = 0;        // lifetime printing seconds (loaded in setu
 unsigned long printStartMs = 0;     // millis() when the current print started
 uint16_t uiTimeoutSecs = 0;         // 0 = never blank the UI screen
 bool uvLedEnabled = true;           // false = dry-run motion/display only
+bool wifiEnabled = true;
+bool webDashboardEnabled = true;
+bool wifiTemporarilyEnabled = false;
+bool webDashboardTemporarilyEnabled = false;
 bool mqttEnabled = false;           // Smart Home / MQTT integration scaffold
 String mqttHost = "";
 uint16_t mqttPort = 1883;
@@ -105,6 +109,8 @@ void loadDeviceConfig() {
   totalPrintSecs = sysPrefs.getULong("printSecs", 0);
   uiTimeoutSecs = sysPrefs.getUShort("uiTimeout", 0);
   uvLedEnabled = sysPrefs.getBool("uvLed", true);
+  wifiEnabled = sysPrefs.getBool("wifiEnabled", true);
+  webDashboardEnabled = sysPrefs.getBool("webDash", true);
   mqttEnabled = sysPrefs.getBool("mqttEnabled", false);
   mqttHost = sysPrefs.getString("mqttHost", "");
   mqttPort = sysPrefs.getUShort("mqttPort", 1883);
@@ -118,6 +124,8 @@ void saveDeviceConfig() {
   sysPrefs.begin("tinymaker", false);
   sysPrefs.putUShort("uiTimeout", uiTimeoutSecs);
   sysPrefs.putBool("uvLed", uvLedEnabled);
+  sysPrefs.putBool("wifiEnabled", wifiEnabled);
+  sysPrefs.putBool("webDash", webDashboardEnabled);
   sysPrefs.putBool("mqttEnabled", mqttEnabled);
   sysPrefs.putString("mqttHost", mqttHost);
   sysPrefs.putUShort("mqttPort", mqttPort);
@@ -212,6 +220,7 @@ float motor_updown_time_total; // Total time spent on motor movements
 // UI Navigation Variables
 int setting_item;              // Current selected item in settings menu
 bool setting_item_updown = 1;  // Direction indicator for settings (1=up, 0=down)
+int advanced_item = 1;         // Current selected item in System -> Advanced
 bool printing_item_updown = 1; //1=up,0=down.
 
 // Printing Flags
@@ -613,24 +622,31 @@ void loop() {
       case 41:
       case 42:
       case 43:
+      case 44:
       screen1(); 
       screen4();
         break;
       case 411:
       screen41();
         break;
+      case 441:
+      screen42();
+        break;
       case 421:
       screen41();
-      screen42();
+      screen43();
         break;
       #if ENABLE_NETWORK
       case 422:                 // install-from-file screen -> back to Update
       screen421();
         break;
+      case 423:                 // temporary WiFi prompt -> cancel, back to System > Update
+      screen43();
+        break;
       #endif
       case 431:
       screen41();
-      screen43();
+      screen44();
         break;
       case 311:
       if(setting_item_updown == 1){
@@ -707,6 +723,10 @@ void loop() {
       screen41(); 
       screen42();
         break;
+      case 44:
+      screen41();
+      screen43();
+        break;
       case 11:
       folderUp(root);
         break;
@@ -743,6 +763,9 @@ void loop() {
       case 3111:
       screen3111increase();
         break;
+      case 441:
+      advancedOptionsUp();
+        break;
     }
     delay(200);
   }  
@@ -766,6 +789,12 @@ void loop() {
         break;
       case 42:
       screen43();
+        break;
+      case 43:
+      screen44();
+        break;
+      case 44:
+      screen41();
         break;
       case 11:
       folderDown(root);
@@ -802,6 +831,9 @@ void loop() {
         break;
       case 3111:
       screen3111decrease();
+        break;
+      case 441:
+      advancedOptionsDown();
         break;
     }
     delay(200);
@@ -1195,9 +1227,18 @@ void loop() {
         #endif
         break;
       case 42:
-        screen421();
+        advanced_item = 1;
+        screenAdvancedOptions();
         break;
       case 43:
+        #if ENABLE_NETWORK
+        if (!wifiEnabled && !wifiTemporarilyEnabled) screenUpdateWifiConfirm();
+        else screen421();
+        #else
+        screen421();
+        #endif
+        break;
+      case 44:
         screen431();
         break;
       #if ENABLE_NETWORK
@@ -1207,10 +1248,19 @@ void loop() {
       case 3121:                // Confirmed -> erase credentials + reboot
         wifiDoReset();
         break;
+      case 423:                 // Temporarily enable WiFi, then open Update
+        wifiTemporarilyEnabled = true;
+        webDashboardTemporarilyEnabled = true;
+        network_setup();
+        screen421();
+        break;
       case 421:                 // Update screen -> install latest (self-update)
         if (otaHasUpdate()) otaInstallLatest();
         break;
       #endif
+      case 441:
+        advancedOptionsSelect();
+        break;
       case 311:
       if(setting_item_updown == 1){
         setting_item ++;

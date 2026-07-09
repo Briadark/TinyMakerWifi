@@ -259,36 +259,58 @@ void screen4(){
   screen = 4;
 }
 
-/**
- * @brief Screens 41-43: System submenu (WiFi Info / About / Update)
- */
-void screen41(){
+String systemLabel(int item) {
+  if (item == 1) return "WiFi Info";
+  if (item == 2) return "Advanced";
+  if (item == 3) return "Update";
+  if (item == 4) return "About";
+  return "";
+}
+
+void drawSystemRow(int item, int y, bool selected) {
+  if (item > 4) item = 1;
+
+  gfx2->drawRoundRect(0, y, 160, 39, 3, selected ? WHITE : BLACK);
+  gfx2->setCursor(5, y + 25);
+  gfx2->print(systemLabel(item));
+}
+
+void drawSystemMenu(uint8_t selected) {
+  if (selected < 1) selected = 1;
+  if (selected > 4) selected = 4;
+
+  int next = selected >= 4 ? 1 : selected + 1;
+
   gfx2->fillScreen(BLACK);
   gfx2->setFont(&FreeSans8pt7b);
-  gfx2->setCursor(7, 17);
   gfx2->setTextColor(WHITE);
   gfx2->setTextSize(1);
-  gfx2->println("WiFi Info");
-  gfx2->setCursor(7, 44);
-  gfx2->print("Update");
-  gfx2->setCursor(7, 71);
-  gfx2->print("About");
-  gfx2->drawRoundRect(1, 1, 158, 24, 3, WHITE);
+
+  drawSystemRow(selected, 0, true);
+  drawSystemRow(next, 41, false);
+}
+
+/**
+ * @brief Screens 41-44: System submenu (WiFi Info / Advanced / Update / About)
+ */
+void screen41(){
+  drawSystemMenu(1);
   screen = 41;
 }
 
 void screen42(){
-  gfx2->drawRoundRect(1, 1, 158, 24, 3, BLACK);
-  gfx2->drawRoundRect(1, 28, 158, 24, 3, WHITE);
-  gfx2->drawRoundRect(1, 55, 158, 24, 3, BLACK);
+  drawSystemMenu(2);
   screen = 42;
 }
 
 void screen43(){
-  gfx2->drawRoundRect(1, 1, 158, 24, 3, BLACK);
-  gfx2->drawRoundRect(1, 28, 158, 24, 3, BLACK);
-  gfx2->drawRoundRect(1, 55, 158, 24, 3, WHITE);
+  drawSystemMenu(3);
   screen = 43;
+}
+
+void screen44(){
+  drawSystemMenu(4);
+  screen = 44;
 }
 
 /**
@@ -304,6 +326,100 @@ void screen411(){
   gfx2->setCursor(5, 55);
   gfx2->print("in this build");
   screen = 411;
+}
+
+bool advancedMqttConfigured() {
+  return mqttHost.length() > 0 || mqttUser.length() > 0 || mqttPass.length() > 0;
+}
+
+int advancedOptionCount() {
+  int count = 3; // screen timeout, dry run, WiFi
+  if (wifiEnabled) count++; // web dashboard
+  if (wifiEnabled && advancedMqttConfigured()) count++; // MQTT
+  return count;
+}
+
+String advancedLabel(int item) {
+  if (item == 1) return "Screen timeout";
+  if (item == 2) return "Dry run";
+  if (item == 3) return "WiFi";
+  if (wifiEnabled && item == 4) return "Web dash";
+  if (wifiEnabled && advancedMqttConfigured() && item == 5) return "MQTT";
+  return "";
+}
+
+String advancedValue(int item) {
+  if (item == 1) {
+    if (uiTimeoutSecs == 0) return "Off";
+    return String(uiTimeoutSecs) + "s";
+  }
+  if (item == 2) return uvLedEnabled ? "Off" : "On";
+  if (item == 3) return wifiEnabled ? "On" : "Off";
+  if (wifiEnabled && item == 4) return webDashboardEnabled ? "On" : "Off";
+  if (wifiEnabled && advancedMqttConfigured() && item == 5) return mqttEnabled ? "On" : "Off";
+  return "";
+}
+
+void drawAdvancedRow(int item, int y, bool selected) {
+  if (item > advancedOptionCount()) item = 1;
+  gfx2->drawRoundRect(0, y, 160, 39, 3, selected ? WHITE : BLACK);
+  gfx2->setCursor(5, y + 15);
+  gfx2->print(advancedLabel(item));
+  gfx2->setCursor(5, y + 33);
+  gfx2->print(advancedValue(item));
+}
+
+void screenAdvancedOptions() {
+  int count = advancedOptionCount();
+  if (advanced_item < 1) advanced_item = 1;
+  if (advanced_item > count) advanced_item = count;
+  int next = advanced_item >= count ? 1 : advanced_item + 1;
+  gfx2->fillScreen(BLACK);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  drawAdvancedRow(advanced_item, 0, true);
+  drawAdvancedRow(next, 41, false);
+  screen = 441;
+}
+
+void advancedOptionsUp() {
+  advanced_item--;
+  if (advanced_item < 1) advanced_item = advancedOptionCount();
+  screenAdvancedOptions();
+}
+
+void advancedOptionsDown() {
+  advanced_item++;
+  if (advanced_item > advancedOptionCount()) advanced_item = 1;
+  screenAdvancedOptions();
+}
+
+void advancedOptionsSelect() {
+  if (advanced_item == 1) {
+    if (uiTimeoutSecs == 0) uiTimeoutSecs = 30;
+    else if (uiTimeoutSecs < 60) uiTimeoutSecs = 60;
+    else if (uiTimeoutSecs < 120) uiTimeoutSecs = 120;
+    else if (uiTimeoutSecs < 300) uiTimeoutSecs = 300;
+    else if (uiTimeoutSecs < 600) uiTimeoutSecs = 600;
+    else uiTimeoutSecs = 0;
+  } else if (advanced_item == 2) {
+    uvLedEnabled = !uvLedEnabled;
+  } else if (advanced_item == 3) {
+    wifiEnabled = !wifiEnabled;
+    if (!wifiEnabled) {
+      webDashboardEnabled = false;
+      mqttEnabled = false;
+    } else {
+      webDashboardEnabled = true;
+    }
+  } else if (wifiEnabled && advanced_item == 4) {
+    webDashboardEnabled = !webDashboardEnabled;
+  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 5) {
+    mqttEnabled = !mqttEnabled;
+  }
+  saveDeviceConfig();
+  screenAdvancedOptions();
 }
 
 #if ENABLE_NETWORK
@@ -344,6 +460,19 @@ void screen422(){
   }
   gfx2->setFont(&FreeSans8pt7b);
   screen = 422;
+}
+
+void screenUpdateWifiConfirm(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 21);
+  gfx2->print("WiFi is off");
+  gfx2->setCursor(8, 43);
+  gfx2->print("Enable for update?");
+  uiButtons("No", "Yes", 0x879F);
+  screen = 423;
 }
 #endif
 

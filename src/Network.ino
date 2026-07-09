@@ -43,6 +43,14 @@
 #include <Preferences.h>   // forcePortal flag (survives reboot)
 #include <PubSubClient.h>
 
+bool networkRuntimeEnabled() {
+  return wifiEnabled || wifiTemporarilyEnabled;
+}
+
+bool webDashboardRuntimeEnabled() {
+  return webDashboardEnabled || webDashboardTemporarilyEnabled;
+}
+
 // Where the printer checks for a newer firmware (self-update, "Install latest").
 // version.txt must contain two lines: (1) the latest version, e.g. "0.7.0",
 // (2) the direct HTTPS URL of that firmware.bin. Both hosted on GitHub Pages.
@@ -865,6 +873,10 @@ String configJson() {
   out += uvLedEnabled ? "false" : "true";
   out += ",\"uvLedEnabled\":";
   out += uvLedEnabled ? "true" : "false";
+  out += ",\"wifiEnabled\":";
+  out += wifiEnabled ? "true" : "false";
+  out += ",\"webDashboardEnabled\":";
+  out += webDashboardEnabled ? "true" : "false";
   out += ",\"mqttEnabled\":";
   out += mqttEnabled ? "true" : "false";
   out += ",\"mqttConfigured\":";
@@ -898,7 +910,10 @@ void applyConfigRequest() {
   Vat_Capacity_Ml = formLong("vat_ml", Vat_Capacity_Ml, 10, 40);
   uiTimeoutSecs = formLong("ui_timeout", uiTimeoutSecs, 0, 3600);
   uvLedEnabled = !server.hasArg("dry_run");
+  wifiEnabled = server.hasArg("wifi_enabled");
+  webDashboardEnabled = wifiEnabled && server.hasArg("web_dashboard_enabled");
   mqttEnabled = server.hasArg("mqtt_enabled");
+  if (!wifiEnabled) mqttEnabled = false;
   mqttHost = formString("mqtt_host", mqttHost, 80);
   mqttPort = formLong("mqtt_port", mqttPort, 1, 65535);
   mqttUser = formString("mqtt_user", mqttUser, 64);
@@ -932,6 +947,8 @@ void resetWebConfigToDefaults() {
   resetSettingsToDefault();
   uiTimeoutSecs = 0;
   uvLedEnabled = true;
+  wifiEnabled = true;
+  webDashboardEnabled = true;
   saveDeviceConfig();
 }
 
@@ -1501,6 +1518,8 @@ void handleRootPage() {
     <label><span>VAT size (ml)</span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
     <label><span>UI timeout (s, 0=off)</span><input name='ui_timeout' id='cfgUiTimeout' type='number' min='0' max='3600' step='5'></label>
     <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
+    <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
+    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web dash</span></label>
     <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT? (SmartHome integration)</span></label>
     <div id='mqttFields' class='spanAll hidden'>
       <div class='configGrid'>
@@ -1721,15 +1740,24 @@ const tickLocalStatus=()=>{
 
 const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton').forEach(e=>e.disabled=disabled);};
 const configIsLocallyLocked=()=>!!(statusData&&statusData.busy);
+const updateNetworkFields=()=>{$('cfgWebDashboardEnabled').disabled=!$('cfgWifiEnabled').checked;};
+const confirmNetworkToggle=e=>{
+  if(e.target.checked){updateNetworkFields();return;}
+  const text=e.target.id==='cfgWifiEnabled'
+    ? 'Turn WiFi off?\nYou will lose web access until it is re-enabled on the printer.'
+    : 'Turn Web dash off?\nYou will lose dashboard access until it is re-enabled on the printer.';
+  if(!confirm(text))e.target.checked=true;
+  updateNetworkFields();
+};
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
 const loadConfig=async()=>{
   try{
     const c=await api('/api/config');
     $('cfgLayerHeight').value=Number(c.layerHeight).toFixed(2); $('cfgBaseExposure').value=c.baseExposure; $('cfgRegularExposure').value=c.regularExposure; $('cfgBaseLayers').value=c.baseLayers; $('cfgTransitionLayers').value=c.transitionLayers;
-    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun;
+    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
-    updateMqttFields();
+    updateNetworkFields();updateMqttFields();
     show('configMqttResetButton',!!c.mqttConfigured);
     $('configDefaultsButton').textContent=c.mqttConfigured?'Reset to defaults (Excluding MQTT)':'Reset to defaults';
     const locked=!!c.locked||configIsLocallyLocked();
@@ -1746,6 +1774,8 @@ $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('MQTT')>=0;if(!confirm(keep?'Reset config to defaults and keep MQTT settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. MQTT settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('disableDryRunButton').addEventListener('click',async()=>{if(!confirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
+$('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
+$('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
@@ -1865,6 +1895,13 @@ void drawWifiBadge() {
 }
 
 void network_setup() {
+  if (!networkRuntimeEnabled()) {
+    WiFi.mode(WIFI_OFF);
+    netMessage("WiFi disabled", "");
+    delay(1000);
+    return;
+  }
+
   // One-shot flag set by wifiDoReset() (menu: System -> WiFi Info -> OK)
   netPrefs.begin("tinymaker", false);
   bool forcePortal = netPrefs.getBool("forcePortal", false);
@@ -1999,7 +2036,8 @@ void network_setup() {
 // combined compilation unit (functions are - prototypes are auto-generated).
 // ===================================================================================
 void network_loop() {
-  server.handleClient();
+  if (!networkRuntimeEnabled()) return;
+  if (webDashboardRuntimeEnabled() || otaMenuOpen()) server.handleClient();
   // Dev espota OTA is answered only while the printer is on the Update screen
   // (same safety gate as the web /update flasher).
   if (otaMenuOpen()) ArduinoOTA.handle();
