@@ -20,9 +20,9 @@ void turn_on_LED(){
   startTime = millis();
   Duration = 0;
   startTime2 = millis();
-  digitalWrite(LED, HIGH); 
+  digitalWrite(LED, uvLedEnabled ? HIGH : LOW);
   
-  while (Duration <= ExposureMillis){
+  while (Duration <= ExposureMillis && !print_canceled){
     Duration = millis()-startTime;
     Duration2 = millis()-startTime2;
     
