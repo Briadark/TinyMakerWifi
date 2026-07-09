@@ -124,6 +124,12 @@ No network? Copy an `.sl1` or `.zip` (exported by PrusaSlicer/UVtools) into the 
 
 In the **Print** menu, **press and hold OK for ~1.5 seconds** on a model — a *Delete model?* confirmation appears (release the button first, then **OK = Delete**, **Back = No**). Deletion removes the whole model folder from the SD card and shows a progress bar (large models take a while — hundreds of layer files). A short OK press starts printing as usual.
 
+## Web dashboard
+
+Open the printer's IP address in any browser for the full dashboard *(contributed by [@Briadark](https://github.com/Briadark))*: live print status and controls, SD card management with one-click start/import, device settings and firmware updates — all in three tabs styled to match the printer's UI.
+
+<img src="Images/mockups/web-dashboard.png" width="420" alt="TinyMakerWiFi web dashboard: live print status, controls and SD manager">
+
 ## Wireless Firmware Updates
 
 > 🔒 **For safety, firmware flashing is only accepted while the printer is on the `System → Update` screen.** Open that screen on the printer first, then start the update. This prevents anyone else on the network from silently re-flashing the printer. (Model upload from PrusaSlicer is not affected — it works any time.)
