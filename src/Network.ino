@@ -1527,7 +1527,7 @@ void handleRootPage() {
     <label><span>UI timeout (s, 0=off)</span><input name='ui_timeout' id='cfgUiTimeout' type='number' min='0' max='3600' step='5'></label>
     <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
-    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web dash</span></label>
+    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web access</span></label>
     <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT? (SmartHome integration)</span></label>
     <div id='mqttFields' class='spanAll hidden'>
       <div class='configGrid'>
@@ -1753,7 +1753,7 @@ const confirmNetworkToggle=e=>{
   if(e.target.checked){updateNetworkFields();return;}
   const text=e.target.id==='cfgWifiEnabled'
     ? 'Turn WiFi off?\nThe printer will reboot and you will lose web access until WiFi is re-enabled on the printer (System > Advanced).'
-    : 'Turn Web dash off?\nYou will lose dashboard access until it is re-enabled on the printer.';
+    : 'Turn web access off?\nThe dashboard AND slicer upload (PrusaSlicer/UVtools) will stop until web access is re-enabled on the printer (System > Advanced).';
   if(!confirm(text))e.target.checked=true;
   updateNetworkFields();
 };
@@ -2063,7 +2063,7 @@ void network_loop() {
   // Refresh the main-menu WiFi badge every 5 s (connection may drop/return
   // while the printer sits in the menu)
   static unsigned long badgeTs = 0;
-  if ((screen == 1 || screen == 2 || screen == 3 || screen == 4) && millis() - badgeTs > 5000) {
+  if (!uiBlanked && (screen == 1 || screen == 2 || screen == 3 || screen == 4) && millis() - badgeTs > 5000) {
     badgeTs = millis();
     drawWifiBadge();
   }
