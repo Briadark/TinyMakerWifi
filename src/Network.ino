@@ -710,6 +710,9 @@ void handleApiFiles() {
 }
 
 void handleApiFileModel() {
+  // Plain details are read-only, but the ?estimate scan occupies the printer
+  // for minutes (decodes every layer) - that is an action, so gate it.
+  if (server.hasArg("estimate") && rejectIfWebControlOff()) return;
   if (printerBusy()) {
     sendApiError(409, "printer busy");
     return;
@@ -1518,7 +1521,7 @@ void handleRootPage() {
 
 <section id='webControlBanner' class='card banner hidden'>
   <strong>Web control is off - view only.</strong>
-  <div>Print controls, SD delete, settings and firmware updates are disabled. Slicer upload and monitoring keep working. Enable: printer &rarr; System &rarr; Advanced.</div>
+  <div>All actions are disabled: print controls, SD changes, uploads, settings and firmware updates. Monitoring and "Send to printer" from the slicer keep working. Enable: printer &rarr; System &rarr; Advanced.</div>
 </section>
 
 <div class='toolbar'>
@@ -1716,7 +1719,7 @@ const uploadWithProgress=(fd,hintEl)=>{
     xhr.send(fd);
   });
 };
-let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0;
+let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,uploadBusy=false;
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
@@ -1743,6 +1746,11 @@ const applyStatus=s=>{
     show('webControlBanner',!wc);
     $('vatRefillButton').disabled=(!!s.busy&&!s.canResume)||!wc;
     $('modelStartButton').disabled=!wc;
+    // estimate scan occupies the printer -> action; keep disabled while running
+    $('modelMlButton').disabled=!wc||$('modelMlButton').textContent!=='Calculate ml';
+    // dashboard upload is UI-locked only - the slicer endpoint stays open
+    $('uploadButton').disabled=!wc||uploadBusy;
+    $('uploadFile').disabled=!wc;
     show('dryRunBanner',!!s.dryRun);
     $('disableDryRunButton').disabled=!!s.busy;
     $('disableDryRunButton').textContent=s.busy?'Disable when idle':'Press here to disable';
@@ -1890,7 +1898,7 @@ window.modelDetails=modelDetails;
 window.startPrint=startPrint;
 window.deleteFile=deleteFile;
 
-$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{$('uploadButton').disabled=false;}});
+$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('MQTT')>=0;if(!confirm(keep?'Reset config to defaults and keep MQTT settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. MQTT settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
@@ -1915,6 +1923,8 @@ const loadUpdate=async()=>{
     $('updInstallLatest').disabled=!(u.hasUpdate&&u.allowed);
     $('updInstallSelected').disabled=!u.allowed;
     $('updUploadButton').disabled=!u.allowed;
+    $('updFile').disabled=!u.allowed;
+    $('updVersionSelect').disabled=!u.allowed;
     $('updMsg').textContent=u.state===4?'Version check failed - is the printer online?':(!u.allowed?'Updates are blocked right now (printing, or Web control is off).':(u.hasUpdate?'A newer firmware is available.':'Firmware is up to date.'));
   }catch(e){$('updMsg').textContent=e.message;}
   try{
