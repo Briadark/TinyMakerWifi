@@ -134,11 +134,19 @@ Open the printer's IP address in any browser for the full dashboard *(contribute
 
 <img src="Images/mockups/web-dashboard.png" width="420" alt="TinyMakerWiFi web dashboard: live print status, controls and SD manager">
 
+On a desktop-sized screen the dashboard spreads into two columns — here it is in real use, idle with a card full of models:
+
+<img src="Images/screenshots/dashboard-desktop-idle.png" width="640" alt="Real dashboard screenshot on a desktop screen: two-column layout, status card and SD manager with model list">
+
 ### 3D preview & live print progress
 
 Every model on the SD card can be previewed in 3D — the browser rebuilds the shape from the sliced layers (the printer only streams a few dozen small files) and draws it inside the build-volume box. Start the print from the dashboard and the same view turns into a **live progress render**: the printed part fills in with color, the unprinted rest stays a ghost outline. Works offline, no libraries, and costs the printer nothing while printing.
 
 <img src="Images/mockups/model-preview-3d.png" width="420" alt="Dashboard 3D model preview in the build volume box, and the same model filling up as print progress">
+
+A real print in progress — a plate of teeth with supports, rendered live in the build-volume box:
+
+<img src="Images/screenshots/dashboard-printing-3d.png" width="640" alt="Real dashboard screenshot while printing: status, print controls and the live 3D print progress render">
 
 ## Advanced menu (WiFi and Web control switches)
 

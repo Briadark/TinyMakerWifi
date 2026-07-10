@@ -126,12 +126,22 @@ void lift_print(){
   int lift_print_steps_total = (lift_print_steps_slow + lift_print_steps_fast);
   stepper.setMaxSpeed(Slow_Lift_Feedrate * steps_mm / 60);
   stepper.enableOutputs();
-  stepper.move(lift_print_steps_total); 
+  stepper.move(lift_print_steps_total);
+  unsigned long liftNetTs = 0;
   while (stepper.distanceToGo()!= 0){
-    if (stepper.distanceToGo()==lift_print_steps_fast){
-      stepper.setMaxSpeed(Fast_Lift_Feedrate * steps_mm / 60); 
+    #if ENABLE_NETWORK
+    // Lift takes seconds and used to serve no network at all - browser
+    // requests (status, cached-page 304s, stop) stalled until it finished.
+    // The layer is already cured; a brief motor pause is harmless.
+    if (millis() - liftNetTs > 300) {
+      liftNetTs = millis();
+      network_loop();
     }
-    stepper.run();    
+    #endif
+    if (stepper.distanceToGo()==lift_print_steps_fast){
+      stepper.setMaxSpeed(Fast_Lift_Feedrate * steps_mm / 60);
+    }
+    stepper.run();
     Duration2 = millis()-startTime2;
     if (Duration2 >= 500 && digitalRead(buttonUp) == LOW && screen == 1111 && print_canceled == false && print_paused == false){
       screen1111UP();
@@ -209,9 +219,16 @@ void lower_print(){
   int lower_print_steps = ((0 - Slow_Lift_Distance - Fast_Lift_Distance + Layer_Height) * steps_mm);
   stepper.setMaxSpeed(Drop_Back_Feedrate * steps_mm / 60);
   stepper.enableOutputs();
-  stepper.move(lower_print_steps); 
+  stepper.move(lower_print_steps);
+  unsigned long lowerNetTs = 0;
   while (stepper.distanceToGo()!= 0){
-    stepper.run();    
+    #if ENABLE_NETWORK
+    if (millis() - lowerNetTs > 300) {   // same as lift_print - see above
+      lowerNetTs = millis();
+      network_loop();
+    }
+    #endif
+    stepper.run();
     Duration2 = millis()-startTime2;
     if (Duration2 >= 500 && digitalRead(buttonUp) == LOW && screen == 1111 && print_canceled == false && print_paused == false){
       screen1111UP();

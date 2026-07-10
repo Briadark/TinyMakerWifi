@@ -1478,6 +1478,13 @@ void handleApiStatus() {
 }
 
 void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
+#ifdef FIRMWARE_VERSION
+  // The page only changes with the firmware: let the browser cache it and
+  // revalidate with a tiny 304. Crucial mid-print, when the network is only
+  // serviced in short windows and a ~70 KB page reload would crawl.
+  server.sendHeader("ETag", "\"" FIRMWARE_VERSION "\"");
+  server.sendHeader("Cache-Control", "no-cache");
+#endif
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", "");
   server.sendContent_P(PSTR(
@@ -1514,7 +1521,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".wbars i{width:4px;background:#4a4a50;border-radius:1px}.wbars i:nth-child(1){height:5px}"
     ".wbars i:nth-child(2){height:9px}.wbars i:nth-child(3){height:13px}.wbars i.on{background:#2fbf4f}"
     ".banner{background:#3a2818;border-color:#e8720c}.banner strong{display:block;color:#ffb15f;margin-bottom:4px}"
-    ".progress{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin-top:10px}"
+    ".progress{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin:10px 0 16px}"
     ".progress span{display:block;height:100%;width:45%;background:#e8720c;animation:barMove 1.1s infinite linear}"
     ".storageBar{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin-top:8px}"
     ".storageBar span{display:block;height:100%;width:0;background:#e8720c;transition:width .2s ease}"
@@ -1544,6 +1551,12 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
 }
 
 void handleRootPage() {
+#ifdef FIRMWARE_VERSION
+  if (server.header("If-None-Match") == "\"" FIRMWARE_VERSION "\"") {
+    server.send(304, "text/html", "");
+    return;
+  }
+#endif
   const char *fw =
 #ifdef FIRMWARE_VERSION
     FIRMWARE_VERSION;
@@ -1601,6 +1614,7 @@ void handleRootPage() {
   <section id='printPreviewCard' class='card hidden'>
     <h2>Print progress 3D</h2>
     <canvas id='printPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
+    <div class='storageBar'><span id='printPreviewBarFill'></span></div>
   </section>
 
   <section id='sdSection' class='card'>
@@ -1691,13 +1705,13 @@ void handleRootPage() {
     <button id='updInstallLatest' class='spanAll' type='button' disabled>Install latest</button>
   </div>
   <div id='updPickRow' class='configGrid hidden' style='margin-top:10px'>
-    <label><span>Install a specific version</span><select id='updVersionSelect'></select></label>
-    <button id='updInstallSelected' class='button secondary' type='button' style='align-self:end;margin:6px 0 12px'>Install selected</button>
+    <label><span>Install a specific version</span><select id='updVersionSelect' disabled></select></label>
+    <button id='updInstallSelected' class='button secondary' type='button' disabled style='align-self:end;margin:6px 0 12px'>Install selected</button>
   </div>
   <form id='updUploadForm' style='margin-top:14px'>
     <div class='label'>Or upload a firmware.bin from <a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>:</div>
-    <input id='updFile' type='file' name='firmware' accept='.bin' required>
-    <button id='updUploadButton' type='submit'>Upload &amp; flash</button>
+    <input id='updFile' type='file' name='firmware' accept='.bin' disabled required>
+    <button id='updUploadButton' type='submit' disabled>Upload &amp; flash</button>
   </form>
   <div class='hint'>Updates are blocked while printing. Do not power off during an update - the printer reboots by itself when done.</div>
 </section>
@@ -1811,6 +1825,8 @@ const applyStatus=s=>{
     $('disableDryRunButton').textContent=s.busy?'Disable when idle':'Press here to disable';
     ['printLayerBox','printResinBox','printRunBox','printRemainingBox','printControls'].forEach(id=>show(id,s.busy));
     show('sdSection',!s.busy);   // an empty, disabled SD manager mid-print is just noise
+    // firmware actions lock the moment a print starts, even mid-visit
+    if(s.busy)['updInstallLatest','updInstallSelected','updUploadButton','updFile','updVersionSelect'].forEach(id=>$(id).disabled=true);
     // 3D print progress: reuses slices prefetched before the start (or by an
     // earlier Preview 3D) - zero printer traffic while printing. A page
     // refresh restores them from localStorage.
@@ -1818,6 +1834,7 @@ const applyStatus=s=>{
     if(s.busy&&s.model&&s.totalLayers>0&&slicesCache.name===s.model&&slicesCache.slices.length){
       show('printPreviewCard',true);
       const frac=Math.min(1,s.currentLayer/s.totalLayers);
+      $('printPreviewBarFill').style.width=Math.round(frac*100)+'%';  // smooth, every poll
       if(Math.abs(frac-lastPrevFrac)>=0.004){lastPrevFrac=frac;drawIso($('printPreviewCanvas'),frac);}
     }else{
       show('printPreviewCard',false);
@@ -2124,9 +2141,12 @@ const loadUpdate=async()=>{
     const sel=$('updVersionSelect');sel.innerHTML='';
     list.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+(cmpVer(v,updInstalledVer)===0?' (installed)':'');sel.appendChild(o);});
     show('updPickRow',list.length>0);
-    // usable right away; the server still enforces its own gates on install
-    $('updInstallSelected').disabled=false;$('updVersionSelect').disabled=false;
-    $('updUploadButton').disabled=false;$('updFile').disabled=false;
+    // usable right away when idle (the server still enforces its own gates);
+    // while printing everything stays locked from the first paint
+    if(!(statusData&&statusData.busy)){
+      $('updInstallSelected').disabled=false;$('updVersionSelect').disabled=false;
+      $('updUploadButton').disabled=false;$('updFile').disabled=false;
+    }
   }catch(e){show('updPickRow',false);}
   try{
     const u=await api('/api/update',null,30000);
@@ -2463,6 +2483,11 @@ void network_setup() {
   // Web firmware update (users): http://tinymaker.local/update
   server.on("/update", HTTP_GET, handleUpdatePage);
   server.on("/update", HTTP_POST, handleUpdateFinish, handleUpdateUpload);
+
+  // Needed for the dashboard's ETag revalidation (WebServer only stores
+  // request headers that were registered up front).
+  static const char *collectKeys[] = {"If-None-Match"};
+  server.collectHeaders(collectKeys, 1);
 
   server.begin();
 
