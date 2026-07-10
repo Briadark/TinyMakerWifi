@@ -1463,6 +1463,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "border-top:1px solid #3a3a3f;padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
     ".rowActions{display:flex;gap:8px;align-items:center}"
     ".meta{font-size:12px;color:#aaa;margin-top:3px}"
+    "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}a:visited{color:#84bcf8}"
     "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
     "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
     ".spanAll{grid-column:1/-1}"
