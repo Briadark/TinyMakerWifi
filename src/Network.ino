@@ -1441,7 +1441,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "border-top:1px solid #3a3a3f;padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
     ".rowActions{display:flex;gap:8px;align-items:center}"
     ".meta{font-size:12px;color:#aaa;margin-top:3px}"
-    "input[type=file],input[type=number],input[type=text],input[type=password]{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
+    "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
     "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
     ".spanAll{grid-column:1/-1}"
     ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:#eee}"
@@ -1604,11 +1604,11 @@ void handleRootPage() {
   </div>
   <div id='updMsg' class='hint'>Checking...</div>
   <div class='actions'>
-    <button id='updInstallLatest' type='button' disabled>Install latest</button>
+    <button id='updInstallLatest' class='spanAll' type='button' disabled>Install latest</button>
   </div>
   <div id='updPickRow' class='configGrid hidden' style='margin-top:10px'>
     <label><span>Install a specific version</span><select id='updVersionSelect'></select></label>
-    <button id='updInstallSelected' class='button secondary' type='button'>Install selected</button>
+    <button id='updInstallSelected' class='button secondary' type='button' style='align-self:end;margin:6px 0 12px'>Install selected</button>
   </div>
   <form id='updUploadForm' style='margin-top:14px'>
     <div class='label'>Or upload a firmware.bin from <a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>:</div>
