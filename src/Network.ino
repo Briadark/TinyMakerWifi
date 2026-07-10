@@ -1529,6 +1529,13 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
     ".configGrid .hint{grid-column:1/-1}"
     "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}}"
+    // Desktop: widen the frame and lay the dashboard cards out in two
+    // columns (status | controls, progress 3D | SD manager). The other
+    // views stay a comfortable single column, centered.
+    "@media(min-width:1000px){.wrap{max-width:1100px}"
+    "#homeView:not(.hidden){display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}"
+    "#homeView .card{margin:0}"
+    "#modelPanel,#configView,#updateView,#dryRunBanner,#webControlBanner{max-width:760px;margin-left:auto;margin-right:auto}}"
     "</style></head><body><main class='wrap'>"));
   server.sendContent_P(bodyBeforeFw);
   server.sendContent(fw);
@@ -1596,7 +1603,7 @@ void handleRootPage() {
     <canvas id='printPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
   </section>
 
-  <section class='card'>
+  <section id='sdSection' class='card'>
     <h2>SD manager</h2>
     <div id='sdUsageBox' class='hidden' style='margin-bottom:12px'>
       <div class='label'>SD memory usage</div>
@@ -1803,8 +1810,11 @@ const applyStatus=s=>{
     $('disableDryRunButton').disabled=!!s.busy;
     $('disableDryRunButton').textContent=s.busy?'Disable when idle':'Press here to disable';
     ['printLayerBox','printResinBox','printRunBox','printRemainingBox','printControls'].forEach(id=>show(id,s.busy));
+    show('sdSection',!s.busy);   // an empty, disabled SD manager mid-print is just noise
     // 3D print progress: reuses slices prefetched before the start (or by an
-    // earlier Preview 3D) - zero printer traffic while printing
+    // earlier Preview 3D) - zero printer traffic while printing. A page
+    // refresh restores them from localStorage.
+    if(s.busy&&s.model&&(slicesCache.name!==s.model||!slicesCache.slices.length))restoreSlicesFromStorage(s.model);
     if(s.busy&&s.model&&s.totalLayers>0&&slicesCache.name===s.model&&slicesCache.slices.length){
       show('printPreviewCard',true);
       const frac=Math.min(1,s.currentLayer/s.totalLayers);
@@ -1949,6 +1959,23 @@ const drawIso=(cv,doneFrac)=>{
   if(doneFrac<1)cap+=' - '+Math.round(doneFrac*100)+'% printed';
   ctx.fillText(cap,12,PREV_H-10);
 };
+// Slices persist in localStorage (~230 KB) so an F5 mid-print does not lose
+// the 3D progress view - the layer endpoint is unavailable while printing.
+const saveSlicesToStorage=()=>{
+  try{
+    const data=slicesCache.slices.map(s=>{let b='';for(let i=0;i<s.length;i++)b+=String.fromCharCode(s[i]);return btoa(b);});
+    localStorage.setItem('tmSlices',JSON.stringify({name:slicesCache.name,gw:slicesCache.gw,gh:slicesCache.gh,modelH:slicesCache.modelH,layers:slicesCache.layers,data:data}));
+  }catch(e){}
+};
+const restoreSlicesFromStorage=name=>{
+  try{
+    const o=JSON.parse(localStorage.getItem('tmSlices')||'null');
+    if(!o||o.name!==name||!o.data||!o.data.length)return false;
+    const slices=o.data.map(b64=>{const b=atob(b64);const s=new Uint8Array(b.length);for(let i=0;i<b.length;i++)s[i]=b.charCodeAt(i);return s;});
+    slicesCache={name:o.name,slices:slices,gw:o.gw,gh:o.gh,modelH:o.modelH,layers:o.layers};
+    return true;
+  }catch(e){return false;}
+};
 const fetchSlices=async(name,layers,modelH,btn)=>{
   const N=Math.min(36,layers),gw=80,gh=60,slices=[];
   const oc=document.createElement('canvas');oc.width=gw;oc.height=gh;
@@ -1966,6 +1993,7 @@ const fetchSlices=async(name,layers,modelH,btn)=>{
     if(btn)btn.textContent='Loading '+Math.round(100*(k+1)/N)+'%';
   }
   slicesCache={name:name,slices:slices,gw:gw,gh:gh,modelH:modelH,layers:layers};
+  saveSlicesToStorage();
 };
 const modelPreview=async()=>{
   if(!selectedModel)return;
@@ -2082,18 +2110,13 @@ $('modelBackButton').addEventListener('click',()=>openView('home'));
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};
 const loadUpdate=async()=>{
-  setText('updInstalled','-');setText('updLatest','-');$('updMsg').textContent='Checking...';$('updInstallLatest').disabled=true;
-  try{
-    const u=await api('/api/update',null,20000);
-    updInstalledVer=u.installed;
-    setText('updInstalled',u.installed);setText('updLatest',u.latest&&u.latest.length?u.latest:'-');
-    $('updInstallLatest').disabled=!(u.hasUpdate&&u.allowed);
-    $('updInstallSelected').disabled=!u.allowed;
-    $('updUploadButton').disabled=!u.allowed;
-    $('updFile').disabled=!u.allowed;
-    $('updVersionSelect').disabled=!u.allowed;
-    $('updMsg').textContent=u.state===4?'Version check failed - is the printer online?':(!u.allowed?'Updates are blocked right now (printing, or Web control is off).':(u.hasUpdate?'A newer firmware is available.':'Firmware is up to date.'));
-  }catch(e){$('updMsg').textContent=e.message;}
+  // Installed is known instantly (printed into the page header) and the
+  // version picker comes straight from GitHub Pages - neither should wait
+  // for the printer's slow (~5-12 s, blocking TLS) latest-version check.
+  updInstalledVer=$('fwVersion').textContent.trim();
+  setText('updInstalled',updInstalledVer||'-');setText('updLatest','-');
+  $('updMsg').textContent='Checking the latest version - takes up to ~10 s...';
+  $('updInstallLatest').disabled=true;
   try{
     const r=await fetch('https://slibbinas.github.io/TinyMakerWifi/versions.txt',{cache:'no-store'});
     if(!r.ok)throw 0;
@@ -2101,7 +2124,21 @@ const loadUpdate=async()=>{
     const sel=$('updVersionSelect');sel.innerHTML='';
     list.forEach(v=>{const o=document.createElement('option');o.value=v;o.textContent=v+(cmpVer(v,updInstalledVer)===0?' (installed)':'');sel.appendChild(o);});
     show('updPickRow',list.length>0);
+    // usable right away; the server still enforces its own gates on install
+    $('updInstallSelected').disabled=false;$('updVersionSelect').disabled=false;
+    $('updUploadButton').disabled=false;$('updFile').disabled=false;
   }catch(e){show('updPickRow',false);}
+  try{
+    const u=await api('/api/update',null,30000);
+    updInstalledVer=u.installed;
+    setText('updInstalled',u.installed);setText('updLatest',u.latest&&u.latest.length?u.latest:'-');
+    $('updInstallLatest').disabled=!(u.hasUpdate&&u.allowed);
+    $('updInstallSelected').disabled=!u.allowed;
+    $('updUploadButton').disabled=!u.allowed;
+    $('updFile').disabled=!u.allowed;
+    $('updVersionSelect').disabled=!u.allowed;
+    $('updMsg').textContent=u.state===4?'Version check failed - the printer could not reach GitHub. Picked versions and file upload still work.':(!u.allowed?'Updates are blocked right now (printing, or Web control is off).':(u.hasUpdate?'A newer firmware is available.':'Firmware is up to date.'));
+  }catch(e){$('updMsg').textContent='Version check did not respond ('+e.message+'). Picked versions and file upload still work.';}
 };
 const installFirmware=async v=>{
   if(v&&updInstalledVer&&cmpVer(v,updInstalledVer)===0){msg('Version '+v+' is already installed.',true);return;}
@@ -2244,7 +2281,9 @@ void otaInstallVersion(const String &ver) {
 // GET /api/update -> installed/latest versions for the dashboard Update tab.
 // Runs the (5-min-cached) version check, so it may block a few seconds.
 void handleApiUpdateGet() {
-  otaCheckLatest();
+  // Never run the blocking (~5-12 s TLS) version check mid-print - it would
+  // stall the print loop's network window. Cached state is returned instead.
+  if (!printerBusy()) otaCheckLatest();
   String out = "\"installed\":\"";
 #ifdef FIRMWARE_VERSION
   out += FIRMWARE_VERSION;

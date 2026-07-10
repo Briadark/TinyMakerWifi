@@ -1029,10 +1029,19 @@ void loop() {
         stepper.enableOutputs();
         long initial_homing = 0;
         long current_position;
+        unsigned long homingNetTs = 0;
         while(!digitalRead(end_stop) && !homing_canceled && !print_canceled){
+          #if ENABLE_NETWORK
+          // Homing can take minutes; without this, web Stop cannot reach the
+          // printer until it finishes (the motor pauses imperceptibly).
+          if (millis() - homingNetTs > 250) {
+            homingNetTs = millis();
+            network_loop();
+          }
+          #endif
           stepper.moveTo(initial_homing);  // Set the position to move to
           initial_homing--;  // Decrease by 1 for next move if needed
-          stepper.run();  // Start moving the stepper          
+          stepper.run();  // Start moving the stepper
           current_position = stepper.currentPosition();
           if (current_position < -106799){
             stepper.disableOutputs();
