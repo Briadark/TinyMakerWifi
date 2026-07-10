@@ -72,6 +72,16 @@ bool webResumePrint = false;        // set by the web dashboard while paused
 // listEntryValid() in Folder.ino.
 bool selIsArchive = false;
 
+// --- VAT resin bookkeeping (no sensor - estimate only) ---
+// vatRemainingMl counts down from "VAT refilled" by each layer's cured-volume
+// estimate. -1 = never set; lazily seeded to Vat_Capacity_Ml (see vatRemaining()).
+float vatRemainingMl = -1;
+bool lowResinPauseEnabled = false;  // pause between layers when estimate runs low
+uint8_t lowResinThresholdMl = 2;    // warning threshold (ml); also pre-start check
+bool lowResinNotified = false;      // latch: pause fires once per threshold crossing
+bool resinWarnAccepted = false;     // pre-start low-resin warning acknowledged
+double resinSampledMl = 0;          // resinUsedMl already subtracted from the VAT
+
 // Factory settings reset - shared by setup() (bad/blank EEPROM) and the
 // Settings -> "Back to Default" menu (Interface.ino).
 void resetSettingsToDefault();
@@ -117,6 +127,9 @@ void loadDeviceConfig() {
   mqttUser = sysPrefs.getString("mqttUser", "");
   mqttPass = sysPrefs.getString("mqttPass", "");
   mqttTopic = sysPrefs.getString("mqttTopic", "TinyMaker");
+  vatRemainingMl = sysPrefs.getFloat("vatRemMl", -1);
+  lowResinPauseEnabled = sysPrefs.getBool("lowResinOn", false);
+  lowResinThresholdMl = sysPrefs.getUChar("lowResinMl", 2);
   sysPrefs.end();
 }
 
@@ -132,6 +145,16 @@ void saveDeviceConfig() {
   sysPrefs.putString("mqttUser", mqttUser);
   sysPrefs.putString("mqttPass", mqttPass);
   sysPrefs.putString("mqttTopic", mqttTopic);
+  sysPrefs.putBool("lowResinOn", lowResinPauseEnabled);
+  sysPrefs.putUChar("lowResinMl", lowResinThresholdMl);
+  sysPrefs.end();
+}
+
+// vatRemainingMl is persisted separately: it changes during printing (periodic
+// checkpoints) and on "VAT refilled", not with the rest of the config.
+void saveVatRemaining() {
+  sysPrefs.begin("tinymaker", false);
+  sysPrefs.putFloat("vatRemMl", vatRemainingMl);
   sysPrefs.end();
 }
 
@@ -234,11 +257,27 @@ float steps_mm = 1463;     // Steps per millimeter for Z-axis
 int homing_Feedrate = 300; // Feedrate for homing
 float max_height = 68;     // Maximum build height (mm)
 
+// Estimated resin left in the VAT. Seeds to a full VAT on first use (or after
+// the capacity setting shrinks below the stored remainder).
+float vatRemaining() {
+  if (vatRemainingMl < 0 || vatRemainingMl > (float)Vat_Capacity_Ml)
+    vatRemainingMl = (float)Vat_Capacity_Ml;
+  return vatRemainingMl;
+}
+
+// "VAT refilled" action (LCD Advanced item / dashboard button / after refill
+// pause): bookkeeping restarts from a full VAT.
+void vatMarkRefilled() {
+  vatRemainingMl = (float)Vat_Capacity_Ml;
+  lowResinNotified = false;
+  saveVatRemaining();
+}
+
 // System State
 int current_layer = 0; // Current layer being printed
 int current_state = 0; // Current printing state
                        // (0=Homing, 1=Curing, 2=Lifting, 3=Dropping, 4=Canceling)
-                       // (5=Pausing, 6=Paused, 7=Resuming, 8=Finish)
+                       // (5=Pausing, 6=Paused, 7=Resuming, 8=Finish, 10=Refill VAT pause)
 
 // Print Parameters (Loaded from EEPROM) 
 float Layer_Height ;        // Layer thickness (mm)
@@ -538,7 +577,10 @@ void loop() {
       screen11();
       counter --;
       folderDown(root);
-        break;      
+        break;
+      case 114:                 // low-resin warning -> back to preview
+      screen111();
+        break;
       case 12:
       screen1(); 
         break;
@@ -887,7 +929,26 @@ void loop() {
       prepareSelectedPrintPreview();
       }
         break;
+      case 114:                 // low-resin warning -> OK = "Start anyway"
+        resinWarnAccepted = true;
+        startFromResin = true;  // re-enters the start path on the next pass
+        screen = 111;
+        break;
       case 111: {
+        // Low-resin pre-start check (bookkeeping estimate, no sensor). The web
+        // start path (webStartPrint) confirms in the browser instead - see
+        // handleApiPrintStart. A fresh model estimate (Start from the resin
+        // screen) allows a need-vs-left comparison; otherwise threshold only.
+        if (!resinWarnAccepted && !webStartPrint) {
+          float needMl = startFromResin ? (float)resinEstimateMl : -1;
+          if ((needMl >= 0 && needMl > vatRemaining()) ||
+              vatRemaining() <= (float)lowResinThresholdMl) {
+            startFromResin = false;
+            screenLowResinWarn(needMl);
+            break;
+          }
+        }
+        resinWarnAccepted = false;
         startFromResin = false;   // consume the resin-screen Start request
         webStartPrint = false;    // consume the web SD-manager Start request
         printStartMs = millis();  // print-hours accounting (incl. pauses)
@@ -896,6 +957,10 @@ void loop() {
         print_canceled = false;
         webResumePrint = false;
         resinUsedMl = 0.0;        // reset cured-resin counter for this print
+        resinSampledMl = 0.0;     // nothing subtracted from the VAT yet
+        lowResinNotified = vatRemaining() <= (float)lowResinThresholdMl;
+                                  // already low at start (user chose to print
+                                  // anyway) - do not pause on the first layer
         current_state = 0;
         current_layer = 0;
         Position_before_pause = 0;
@@ -993,7 +1058,15 @@ void loop() {
           #if ENABLE_NETWORK
           network_service_window(160);
           #endif
-            
+
+          // VAT bookkeeping: subtract this layer's cured volume; checkpoint to
+          // NVS every 25 layers so a power loss costs little (flash-wear-friendly)
+          vatRemaining();
+          vatRemainingMl -= (float)(resinUsedMl - resinSampledMl);
+          resinSampledMl = resinUsedMl;
+          if (vatRemainingMl < 0) vatRemainingMl = 0;
+          if (current_layer % 25 == 0) saveVatRemaining();
+
           if (screen != 11111 && screen != 11112){                
             gfx2->fillRoundRect(2, 38, 116, 40, 3, BLACK);
             gfx2->setFont(&FreeSans8pt7b);
@@ -1038,9 +1111,19 @@ void loop() {
           if(current_layer == layer_counter)
             break;
             
+          // Low resin: pause between layers (reuses the normal pause flow).
+          // Fires once per threshold crossing; "VAT refilled" re-arms it.
+          bool lowResinPauseNow = false;
+          if (lowResinPauseEnabled && !lowResinNotified && !print_paused &&
+              !print_canceled && vatRemainingMl <= (float)lowResinThresholdMl) {
+            lowResinNotified = true;
+            lowResinPauseNow = true;
+            print_paused = true;
+          }
+
           // -----------------------------------------------------------------------------
           // Pause Handling
-          // -----------------------------------------------------------------------------          
+          // -----------------------------------------------------------------------------
           if(print_paused == true){
             Position_before_pause = stepper.currentPosition();
             stepper.setMaxSpeed(Fast_Lift_Feedrate * steps_mm / 60);
@@ -1055,10 +1138,12 @@ void loop() {
             stepper.disableOutputs();
             delay(10); 
 
-            current_state = 6;
+            current_state = lowResinPauseNow ? 10 : 6;  // 10 = "Refill VAT" pause
+            lowResinPauseNow = false;
+            saveVatRemaining();   // checkpoint at the pause point
             screen1111_state();
             gfx2->fillRect(136, 12, 16, 16, RED);
-            gfx2->fillTriangle(136, 52, 136, 68, 152, 60, GREEN);            
+            gfx2->fillTriangle(136, 52, 136, 68, 152, 60, GREEN);
             screen1111DOWN();
               
             while(print_paused == true){
@@ -1161,6 +1246,7 @@ void loop() {
         }
         digitalWrite(FAN, LOW);
         savePrintTime();   // single exit point: finish, cancel and homing-abort
+        saveVatRemaining();
         screen1();
       }
         break;

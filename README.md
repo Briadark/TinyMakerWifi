@@ -9,17 +9,19 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * **WiFi setup via captive portal** — no credentials in code, configured from your phone on first boot
 * **Direct upload from PrusaSlicer** ("Send to printer" button) — the printer emulates the Prusa SL1 network protocol
 * Automatic unpacking of uploaded `.sl1` / `.zip` files into the layer format the stock firmware expects (works with both PrusaSlicer and UVtools numbering)
-* New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), firmware Update info, About
+* New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), **Advanced** settings, firmware Update, About
+* **Advanced menu on the printer** — screen timeout, dry run, VAT refilled, low resin pause, and **WiFi / Web control on-off switches**, all without a computer *(contributed by [@Briadark](https://github.com/Briadark))*
 * WiFi status indicator (green/grey dot) on the main menu
 * **Model deletion from the printer** — long-press OK on a model in the Print menu
 * **Import from SD card** — copy an `.sl1`/`.zip` onto the card and it shows up in the Print menu (in blue); press OK to convert it into a printable model. Works without any network, the archive is removed after a successful import
 * **Lifetime print-hours counter** — the About screen shows total printing time (stored in NVS, survives firmware updates)
 * **Resin usage estimate** — press UP on the print preview to estimate the resin a model needs — shown in ml AND in vat fills (e.g. `12.4 ml = 0.8 VAT`; vat size adjustable 10–40 ml in Settings, default 15). Live ml is shown while printing
+* **Resin level tracking** — the printer keeps an estimate of how much resin is left in the VAT, warns before starting a print with too little, and can optionally pause mid-print for a refill (see [Resin level & refills](#resin-level--refills))
 * **WiFi reset** — from the System menu, or by holding the BACK button while powering on
 * **Web dashboard** — open the printer's IP in a browser: SD manager (upload/delete/start), live print status with pause/resume/stop, device config and a dry-run test mode *(contributed by [@Briadark](https://github.com/Briadark))*
-* **MQTT / Home Assistant** — optional integration with auto-discovery: print state, layers, resin, run/remaining time as HA sensors
-* **Firmware updates over WiFi** — self-update straight from the printer (System → Update shows installed vs latest, one-button install), browser upload for a specific/older version, and PlatformIO OTA for developers. Flashing is gated to the Update menu for safety.
-* Everything is optional: build switches let you compile the original, network-free firmware from the same code base
+* **MQTT / Home Assistant** — optional integration with auto-discovery: print state, layers, resin used, **resin left + low-resin alert**, run/remaining time as HA sensors
+* **Firmware updates over WiFi** — self-update from the printer (System → Update) or from the dashboard's **Update tab** (install latest, pick **any version** from a list, or upload a file). PlatformIO OTA for developers. Flashing is blocked while printing.
+* Everything is switchable: WiFi and Web control can be turned off right on the printer (System → Advanced), and build switches still let developers compile the original, network-free firmware from the same code base
 
 ## Screens
 
@@ -130,15 +132,49 @@ Open the printer's IP address in any browser for the full dashboard *(contribute
 
 <img src="Images/mockups/web-dashboard.png" width="420" alt="TinyMakerWiFi web dashboard: live print status, controls and SD manager">
 
+## Advanced menu (WiFi and Web control switches)
+
+**System → Advanced** on the printer *(contributed by [@Briadark](https://github.com/Briadark))* holds the device toggles — OK changes a value, Back returns:
+
+| Item | What it does |
+|---|---|
+| Screen timeout | Blank the status screen after 30 s…10 min of inactivity (Off = never) |
+| Dry run | Test prints without UV — motion and display only |
+| VAT refilled | Press after refilling resin — restarts the level estimate from a full VAT |
+| Low resin pause | On = the print pauses for a refill when the estimate runs low |
+| **WiFi** | **On/Off — the whole network** (web, PrusaSlicer upload, MQTT, self-update) |
+| Web control | On/Off — browser dashboard + slicer upload (MQTT/HA status keeps working) |
+| MQTT | On/Off (shown once MQTT is configured in the dashboard) |
+
+How the network switches behave:
+
+* **WiFi Off** makes the printer fully offline, like the original firmware. Toggling WiFi asks *"Reboot now?"* — OK reboots and applies it immediately, Back applies it on the next power-up. Everything network-related disappears from the menus until WiFi is back on — **turning it back on is done right here (System → Advanced → WiFi)**, no reflash or reset needed.
+* **Web control Off** keeps the printer on WiFi (Home Assistant still gets status, self-update still works) but stops the browser dashboard **and** PrusaSlicer/UVtools "Send to printer". Use it when you want monitoring without anyone on the network being able to control the printer.
+* If WiFi is off and you open **System → Update**, the printer offers to enable WiFi temporarily just for the update.
+* WiFi and Web control are also in the dashboard's Settings tab (with a confirmation, since unchecking them cuts off your own web access — the printer reboots if you turn WiFi off from the browser).
+
+Both switches default to **On**, and stay On after upgrading from an older version — nothing changes until you change it.
+
+## Resin level & refills
+
+The printer has no resin sensor — instead it **keeps count**: every printed layer's cured volume (the same white-pixel estimate used for the ml counter) is subtracted from the VAT level. The estimate survives reboots and firmware updates.
+
+* **"Resin left (est.)"** is shown on the dashboard; in Home Assistant it appears as a *Resin left* sensor plus a *Resin low* alert you can automate notifications on.
+* **After refilling**, tell the printer: **System → Advanced → VAT refilled** on the printer, or the **VAT refilled** button on the dashboard. The estimate restarts from a full VAT (your VAT size setting).
+* **Before a print starts**, if the level is at/below the warning threshold (or a fresh ml estimate says the model needs more than what's left), the printer shows **"Low resin!"** with the numbers — Start anyway or Back. Starting from the browser asks the same in a dialog.
+* **Low resin pause** (optional, default Off): mid-print, when the level drops to the threshold, the printer finishes the layer, lifts and pauses showing **"Refill VAT!"** — refill, press VAT refilled (dashboard) or just resume. The threshold (`Low resin warn`, 1–10 ml, default 2) is set in the dashboard's Settings tab.
+
+> ⚠️ It is an **estimate**, not a measurement — it doesn't account for resin sticking to models or drips, so treat it as a planning aid and glance at the real VAT now and then. Refills you don't confirm with "VAT refilled" won't be counted.
+
 ## Wireless Firmware Updates
 
-> 🔒 **For safety, firmware flashing is only accepted while the printer is on the `System → Update` screen.** Open that screen on the printer first, then start the update. This prevents anyone else on the network from silently re-flashing the printer. (Model upload from PrusaSlicer is not affected — it works any time.)
+> 🔒 Firmware flashing is **blocked while the printer is printing**, and the web paths require **Web control** to be on. (Model upload from PrusaSlicer is separate — it works any time.)
 
-The `System → Update` screen shows the **installed** version and checks GitHub for the **latest**. From there you have two options:
+Three ways to update:
 
-* **Install (self-update, no computer):** if a newer version is available, the `Install` button lights up. Press **OK** — the printer downloads and flashes the latest firmware itself over WiFi. Nothing else needed.
-* **Install from file (browser — any/older version):** on the Update screen press **UP (`Local`)** to open the *Install from file* screen, which shows the address `http://<printer-ip>/update`. Open it in a browser, pick a `firmware.bin` you downloaded from [Releases](https://github.com/slibbinas/TinyMakerWifi/releases), and upload it. Use this to install a **specific or older** version, or a local build.
-* **For developers:** PlatformIO OTA — open `System → Update` on the printer, then select the `env:tinymaker-ota` environment and Upload goes over WiFi.
+* **On the printer (self-update, no computer):** `System → Update` shows the **installed** version and checks GitHub for the **latest**. If a newer one is available, the `Install` button lights up — press **OK** and the printer downloads and flashes it itself over WiFi.
+* **From the dashboard — the Update tab:** shows installed vs latest with an **Install latest** button, a **version picker** (install any released version, downgrades ask for confirmation) and a **file upload** for a `firmware.bin` from [Releases](https://github.com/slibbinas/TinyMakerWifi/releases) or a local build.
+* **For developers:** PlatformIO OTA — open `System → Update` on the printer (this path keeps the strict screen gate), then select the `env:tinymaker-ota` environment and Upload goes over WiFi.
 
 Do not power off during an update — and don't worry too much either: the dual OTA partition keeps the previous firmware if the update fails.
 
@@ -156,10 +192,12 @@ Requirements: [VS Code + PlatformIO](https://platformio.org/).
 3. `pio run` — the platform (`espressif32@6.5.0`, Arduino core 2.x) and the network libraries (WiFiManager, unzipLIB) are fetched automatically. Do not upgrade to Arduino core 3.x.
 4. First flash goes over USB (`env:tinymaker`, CH340 serial); after that OTA works (`env:tinymaker-ota`).
 
-Build switches at the top of the main `.ino`:
+Build switches at the top of the main `.ino` — **developers only**. To simply
+turn WiFi off, use **System → Advanced → WiFi** on the printer instead; the
+compile-time switch exists for building a binary with no network code at all:
 
 ```cpp
-#define ENABLE_NETWORK       1   // 0 = original firmware behavior, no network code
+#define ENABLE_NETWORK       1   // 0 = original firmware behavior, no network code compiled in
 #define ENABLE_SERIAL_DEBUG  1   // 0 = no serial output
 ```
 

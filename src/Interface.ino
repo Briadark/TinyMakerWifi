@@ -333,8 +333,8 @@ bool advancedMqttConfigured() {
 }
 
 int advancedOptionCount() {
-  int count = 3; // screen timeout, dry run, WiFi
-  if (wifiEnabled) count++; // web dashboard
+  int count = 5; // screen timeout, dry run, VAT refilled, low resin pause, WiFi
+  if (wifiEnabled) count++; // web control
   if (wifiEnabled && advancedMqttConfigured()) count++; // MQTT
   return count;
 }
@@ -342,9 +342,11 @@ int advancedOptionCount() {
 String advancedLabel(int item) {
   if (item == 1) return "Screen timeout";
   if (item == 2) return "Dry run";
-  if (item == 3) return "WiFi";
-  if (wifiEnabled && item == 4) return "Web control";
-  if (wifiEnabled && advancedMqttConfigured() && item == 5) return "MQTT";
+  if (item == 3) return "VAT refilled";
+  if (item == 4) return "Low resin pause";
+  if (item == 5) return "WiFi";
+  if (wifiEnabled && item == 6) return "Web control";
+  if (wifiEnabled && advancedMqttConfigured() && item == 7) return "MQTT";
   return "";
 }
 
@@ -354,9 +356,11 @@ String advancedValue(int item) {
     return String(uiTimeoutSecs) + "s";
   }
   if (item == 2) return uvLedEnabled ? "Off" : "On";
-  if (item == 3) return wifiEnabled ? "On" : "Off";
-  if (wifiEnabled && item == 4) return webDashboardEnabled ? "On" : "Off";
-  if (wifiEnabled && advancedMqttConfigured() && item == 5) return mqttEnabled ? "On" : "Off";
+  if (item == 3) return String(vatRemaining(), 1) + " ml left";
+  if (item == 4) return lowResinPauseEnabled ? "On" : "Off";
+  if (item == 5) return wifiEnabled ? "On" : "Off";
+  if (wifiEnabled && item == 6) return webDashboardEnabled ? "On" : "Off";
+  if (wifiEnabled && advancedMqttConfigured() && item == 7) return mqttEnabled ? "On" : "Off";
   return "";
 }
 
@@ -406,6 +410,10 @@ void advancedOptionsSelect() {
   } else if (advanced_item == 2) {
     uvLedEnabled = !uvLedEnabled;
   } else if (advanced_item == 3) {
+    vatMarkRefilled();          // action item: bookkeeping restarts from full
+  } else if (advanced_item == 4) {
+    lowResinPauseEnabled = !lowResinPauseEnabled;
+  } else if (advanced_item == 5) {
     wifiEnabled = !wifiEnabled;
     if (!wifiEnabled) {
       webDashboardEnabled = false;
@@ -413,19 +421,48 @@ void advancedOptionsSelect() {
     } else {
       webDashboardEnabled = true;
     }
-  } else if (wifiEnabled && advanced_item == 4) {
+  } else if (wifiEnabled && advanced_item == 6) {
     webDashboardEnabled = !webDashboardEnabled;
-  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 5) {
+  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 7) {
     mqttEnabled = !mqttEnabled;
   }
   saveDeviceConfig();
-  if (advanced_item == 3) {
+  if (advanced_item == 5) {
     // WiFi state only changes at boot (network_setup has no runtime
     // teardown/bring-up path), so offer a reboot to apply it now.
     screenRebootConfirm();
     return;
   }
   screenAdvancedOptions();
+}
+
+/**
+ * @brief Screen 113: low-resin warning before starting a print.
+ * needMl >= 0 when a fresh model estimate exists (Start from the resin
+ * screen); -1 = threshold-only warning. OK starts anyway, Back cancels.
+ */
+void screenLowResinWarn(float needMl) {
+  uiFrame(RED);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 21);
+  gfx2->print("Low resin!");
+  gfx2->setTextColor(0x879F);
+  gfx2->setCursor(8, 43);
+  if (needMl >= 0) {
+    gfx2->print("Need ");
+    gfx2->print(needMl, 1);
+    gfx2->print(", have ~");
+    gfx2->print(vatRemaining(), 1);
+  } else {
+    gfx2->print("~");
+    gfx2->print(vatRemaining(), 1);
+    gfx2->print(" ml left in VAT");
+  }
+  gfx2->setTextColor(WHITE);
+  uiButtons("Back", "Start", 0x879F);
+  screen = 114;
 }
 
 /**
@@ -841,8 +878,12 @@ void screen1111_state(){
       case 8:
       gfx2->setCursor(32, 14);
       gfx2->print("Finish :)");
-        break;     
-    }         
+        break;
+      case 10:                  // low-resin pause (paused variant)
+      gfx2->setCursor(26, 14);
+      gfx2->print("Refill VAT!");
+        break;
+    }
   }
 }
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

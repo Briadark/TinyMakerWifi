@@ -34,16 +34,32 @@ The URL the firmware checks is set in `src/Network.ino`:
    - `https://slibbinas.github.io/TinyMakerWifi/version.txt`
    - `https://slibbinas.github.io/TinyMakerWifi/firmware.bin`
 
-## Each release
+## Each release (automated)
 
-1. Bump `FIRMWARE_VERSION` in `platformio.ini` (e.g. `0.7.0` → `0.8.0`) and build.
-2. Copy the new `firmware.bin` to the `gh-pages` branch.
-3. Update `version.txt` on `gh-pages` with the new version number (the URL stays
-   the same). Commit/push.
+Since 0.11.0 the whole flow is one script (run from the repo root, with
+`FIRMWARE_VERSION` already bumped in **both** envs of `platformio.ini` and the
+release commit in place):
+
+```
+%USERPROFILE%\.platformio\penv\Scripts\python.exe scripts\release.py --notes-file notes.md
+```
+
+It builds both envs, pushes `main` + the `vX.Y.Z` tag, publishes to `gh-pages`
+(`firmware.bin`, `firmware-X.Y.Z.bin`, `version.txt`, `versions.txt`) and
+creates the GitHub Release with `firmware.bin` + `firmware-full.bin` attached.
+`--dry-run` stops after the build; the GitHub token comes from the git
+credential helper automatically.
+
+## Files on `gh-pages` (Level B - version picker)
+
+- `version.txt` — two lines: latest version + firmware.bin URL (the printer's
+  "Install latest" check).
+- `firmware.bin` — always the latest build.
+- `firmware-X.Y.Z.bin` — one archived copy per release; the dashboard's
+  version picker installs these directly.
+- `versions.txt` — the picker's manifest: one `X.Y.Z` per line, newest first.
+  The browser fetches it straight from GitHub Pages (CORS is open).
 
 The version check compares `MAJOR.MINOR.PATCH`, so "Install" only lights up when
-`version.txt` is strictly newer than the running firmware.
-
-> This is designed to grow into a full version picker later (host multiple
-> `firmware-X.Y.Z.bin` + a manifest); the single-file layout above is the
-> minimal "Install latest" (Level A) setup.
+`version.txt` is strictly newer than the running firmware. The dashboard's
+picker also allows downgrades (with a warning).
