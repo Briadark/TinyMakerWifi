@@ -124,18 +124,66 @@ bool connectPostForm(const String &path, const String &body, String &response, S
   }
 
   http.setTimeout(8000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   int code = http.POST(body);
   response = http.getString();
+  String httpError = code < 0 ? http.errorToString(code) : "";
   http.end();
 
   if (code < 200 || code >= 300) {
-    error = "server returned HTTP " + String(code);
+    error = code < 0 ? ("connection failed: " + httpError) : ("server returned HTTP " + String(code));
     return false;
   }
   if (response.indexOf("\"ok\":false") >= 0) {
     String serverError = connectJsonString(response, "error");
     error = serverError.length() ? serverError : "server rejected request";
+    return false;
+  }
+  return true;
+}
+
+bool connectGet(const String &path, String &response, String &error) {
+  if (WiFi.status() != WL_CONNECTED) {
+    error = "WiFi is not connected";
+    return false;
+  }
+
+  String base = connectNormalizeBaseUrl(connectBaseUrl);
+  if (base.length() == 0) {
+    error = "TinyMaker Connect server URL is empty";
+    return false;
+  }
+
+  String url = base + path;
+  HTTPClient http;
+  WiFiClient plain;
+  WiFiClientSecure secure;
+  bool ok = false;
+  if (url.startsWith("https://")) {
+    secure.setInsecure();
+    ok = http.begin(secure, url);
+  } else {
+    ok = http.begin(plain, url);
+  }
+  if (!ok) {
+    error = "could not start HTTP request";
+    return false;
+  }
+
+  http.setTimeout(8000);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  int code = http.GET();
+  response = http.getString();
+  String httpError = code < 0 ? http.errorToString(code) : "";
+  http.end();
+
+  if (code < 200 || code >= 300) {
+    error = code < 0 ? ("connection failed: " + httpError) : ("server returned HTTP " + String(code));
+    return false;
+  }
+  if (response.indexOf("\"ok\":true") < 0) {
+    error = "server health check failed";
     return false;
   }
   return true;
@@ -194,7 +242,9 @@ String tinymakerConnectConfigJson() {
   out += jsonEscape(connectPrinterPublicId);
   out += "\",\"connectTokenSet\":";
   out += connectPublishToken.length() > 0 ? "true" : "false";
-  out += ",\"connectLastStatus\":\"";
+  out += ",\"connectPublishToken\":\"";
+  out += jsonEscape(connectPublishToken);
+  out += "\",\"connectLastStatus\":\"";
   out += jsonEscape(connectLastStatus);
   out += "\"";
   return out;
@@ -219,6 +269,24 @@ void handleApiConnectRegister() {
   out += jsonEscape(connectPrinterPublicId);
   out += "\",\"connectTokenSet\":";
   out += connectPublishToken.length() > 0 ? "true" : "false";
+  sendApiOk(out);
+}
+
+void handleApiConnectTest() {
+  if (rejectIfWebControlOff()) return;
+
+  String response;
+  String error;
+  if (!connectGet("/health.php", response, error)) {
+    connectLastStatus = error;
+    saveDeviceConfig();
+    sendApiError(502, error.c_str());
+    return;
+  }
+
+  connectLastStatus = "server reachable";
+  saveDeviceConfig();
+  String out = "\"message\":\"server reachable\"";
   sendApiOk(out);
 }
 

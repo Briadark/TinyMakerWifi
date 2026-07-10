@@ -10,3 +10,7 @@ compile_commands.json
 
 # Local, private Claude skills (kept out of the public repo; backup: secret gist)
 .claude/skills/
+
+# TinyMaker Connect local server install output
+Web_Server/app/config.php
+Web_Server/storage/

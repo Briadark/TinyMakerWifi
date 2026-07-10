@@ -110,7 +110,7 @@ String mqttUser = "";
 String mqttPass = "";
 String mqttTopic = "TinyMaker";
 bool connectEnabled = false;        // TinyMaker Connect web-service integration
-String connectBaseUrl = "";
+String connectBaseUrl = "https://tinymaker.inductie.nu";
 String connectPrinterName = "TinyMaker";
 bool connectLeaderboardOptIn = false;
 String connectPrinterPublicId = "";
@@ -140,7 +140,7 @@ void loadDeviceConfig() {
   mqttPass = sysPrefs.getString("mqttPass", "");
   mqttTopic = sysPrefs.getString("mqttTopic", "TinyMaker");
   connectEnabled = sysPrefs.getBool("tmcEnabled", false);
-  connectBaseUrl = sysPrefs.getString("tmcUrl", "");
+  connectBaseUrl = sysPrefs.getString("tmcUrl", "https://tinymaker.inductie.nu");
   connectPrinterName = sysPrefs.getString("tmcName", "TinyMaker");
   connectLeaderboardOptIn = sysPrefs.getBool("tmcLeaderboard", false);
   connectPrinterPublicId = sysPrefs.getString("tmcPublicId", "");
