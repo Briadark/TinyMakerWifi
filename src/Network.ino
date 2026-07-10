@@ -1512,7 +1512,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
     ".spanAll{grid-column:1/-1}"
     ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:#eee}"
-    ".actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}"
+    ".actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}"
     // Tabs: equal-size Dashboard/Settings/Update, active one orange
     ".toolbar{display:flex;gap:8px;margin:12px 0}.toolbar button,.toolbar .button{width:auto;flex:1;margin-top:0;background:#3c3c42;color:#eee}"
     ".toolbar .active{background:#e8720c;color:#fff}"
@@ -2126,6 +2126,14 @@ $('modelBackButton').addEventListener('click',()=>openView('home'));
 
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};
+// Install selected turns orange only when pressing it would change something
+const refreshInstallSelected=()=>{
+  const v=$('updVersionSelect').value;
+  const same=!v||(updInstalledVer&&cmpVer(v,updInstalledVer)===0);
+  $('updInstallSelected').classList.toggle('secondary',!!same);
+  if(same)$('updInstallSelected').disabled=true;
+  else if(!(statusData&&statusData.busy))$('updInstallSelected').disabled=false;
+};
 const loadUpdate=async()=>{
   // Installed is known instantly (printed into the page header) and the
   // version picker comes straight from GitHub Pages - neither should wait
@@ -2144,19 +2152,20 @@ const loadUpdate=async()=>{
     // usable right away when idle (the server still enforces its own gates);
     // while printing everything stays locked from the first paint
     if(!(statusData&&statusData.busy)){
-      $('updInstallSelected').disabled=false;$('updVersionSelect').disabled=false;
+      $('updVersionSelect').disabled=false;
       $('updUploadButton').disabled=false;$('updFile').disabled=false;
     }
+    refreshInstallSelected();
   }catch(e){show('updPickRow',false);}
   try{
     const u=await api('/api/update',null,30000);
     updInstalledVer=u.installed;
     setText('updInstalled',u.installed);setText('updLatest',u.latest&&u.latest.length?u.latest:'-');
     $('updInstallLatest').disabled=!(u.hasUpdate&&u.allowed);
-    $('updInstallSelected').disabled=!u.allowed;
     $('updUploadButton').disabled=!u.allowed;
     $('updFile').disabled=!u.allowed;
     $('updVersionSelect').disabled=!u.allowed;
+    if(u.allowed)refreshInstallSelected();else $('updInstallSelected').disabled=true;
     $('updMsg').textContent=u.state===4?'Version check failed - the printer could not reach GitHub. Picked versions and file upload still work.':(!u.allowed?'Updates are blocked right now (printing, or Web control is off).':(u.hasUpdate?'A newer firmware is available.':'Firmware is up to date.'));
   }catch(e){$('updMsg').textContent='Version check did not respond ('+e.message+'). Picked versions and file upload still work.';}
 };
@@ -2169,6 +2178,7 @@ const installFirmware=async v=>{
 };
 $('updInstallLatest').addEventListener('click',()=>installFirmware(''));
 $('updInstallSelected').addEventListener('click',()=>installFirmware($('updVersionSelect').value));
+$('updVersionSelect').addEventListener('change',refreshInstallSelected);
 $('updUploadForm').addEventListener('submit',async e=>{
   e.preventDefault();
   if(!confirm('Flash the selected firmware.bin? The printer reboots when done.'))return;

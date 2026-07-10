@@ -10,7 +10,7 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * **Direct upload from PrusaSlicer** ("Send to printer" button) — the printer emulates the Prusa SL1 network protocol
 * Automatic unpacking of uploaded `.sl1` / `.zip` files into the layer format the stock firmware expects (works with both PrusaSlicer and UVtools numbering)
 * New **System** menu on the printer: WiFi Info (SSID, signal, IP, reset), **Advanced** settings, firmware Update, About
-* **Advanced menu on the printer** — screen timeout, dry run, VAT refilled, low resin pause, and **WiFi / Web control on-off switches**, all without a computer *(contributed by [@Briadark](https://github.com/Briadark))*
+* **Advanced menu on the printer** — screen timeout, dry run, the resin-tracking controls (VAT refilled, low-resin pause, warn threshold, ask-refill) and **WiFi / Web control on-off switches**, all without a computer *(contributed by [@Briadark](https://github.com/Briadark))*
 * WiFi status indicator (green/grey dot) on the main menu
 * **Model deletion from the printer** — long-press OK on a model in the Print menu
 * **Import from SD card** — copy an `.sl1`/`.zip` onto the card and it shows up in the Print menu (in blue); press OK to convert it into a printable model. Works without any network, the archive is removed after a successful import
@@ -27,7 +27,7 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 
 ## Screens
 
-The small status display drives the whole UI — first-boot WiFi setup, wireless upload, resin estimate, and self-update:
+The small status display drives the whole UI — first-boot WiFi setup, wireless upload, resin estimate and guarding, device toggles, and self-update:
 
 ![TinyMaker WiFi — printer UI screens](Images/mockups/printer-screens.png)
 
@@ -159,7 +159,7 @@ A real print in progress — a plate of teeth with supports, rendered live in th
 | Low resin warn | The warning/pause threshold, 1–3 ml (OK cycles) |
 | Ask refill | On = every print starts with a "VAT refilled?" question (Yes resets the estimate to a full VAT). Turn Off if you press *VAT refilled* yourself |
 | **WiFi** | **On/Off — the whole network** (web, PrusaSlicer upload, MQTT, self-update) |
-| Web control | On/Off — browser **actions**. Off = the dashboard turns view-only (watch, but no print control, SD delete, settings or firmware updates); slicer upload and MQTT/HA keep working |
+| Web control | On/Off — browser **actions**. Off = the dashboard turns view-only (watch, but no print control, SD changes, uploads, settings or firmware updates); slicer upload and MQTT/HA keep working |
 | MQTT | On/Off (shown once MQTT is configured in the dashboard) |
 
 How the network switches behave:

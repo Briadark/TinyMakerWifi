@@ -152,6 +152,75 @@ def draw_update_page(installed, latest):
     return img
 
 
+def extend_printer_screens():
+    """Append a 5th row to the printer-screens collage: Advanced menu,
+    low-resin warning and the ask-refill screens (added in 0.10-0.12).
+    Idempotent: always crops the original 1920 px and redraws the row."""
+    ORANGE_ = ORANGE
+    CYAN = (135, 240, 250)
+    RED = (235, 80, 70)
+    CARD = (27, 27, 30)
+    CAPTION = (150, 150, 155)
+
+    p = MOCKUPS / "printer-screens.png"
+    src = Image.open(p).convert("RGB")
+    base = src.crop((0, 0, 2080, 1920))
+    img = Image.new("RGB", (2080, 2352), (0, 0, 0))
+    img.paste(base, (0, 0))
+    d = ImageDraw.Draw(img)
+
+    cols = (50, 728, 1404)
+    CW, CH, Y0 = 626, 388, 1936
+    LW, LH = 560, 280            # inner LCD area (160x80 scaled x3.5)
+
+    def tile(cx, caption):
+        d.rounded_rectangle((cx, Y0, cx + CW, Y0 + CH), 22, fill=CARD)
+        lx, ly = cx + (CW - LW) // 2, Y0 + 24
+        d.rounded_rectangle((lx, ly, lx + LW, ly + LH), 8, fill=(5, 5, 5))
+        f = _seg(26)
+        bb = f.getbbox(caption)
+        d.text((cx + (CW - (bb[2] - bb[0])) / 2, Y0 + CH - 60), caption,
+               font=f, fill=CAPTION)
+        return lx, ly
+
+    def btn(x, y, w, label, bg, fg):
+        d.rounded_rectangle((x, y, x + w, y + 62), 8, fill=bg)
+        _center(d, (x, y, x + w, y + 62), label, _seg(30, True), fg)
+
+    # --- tile 1: System > Advanced (two visible rows, like drawAdvancedRow)
+    lx, ly = tile(cols[0], "System > Advanced - device toggles")
+    d.rounded_rectangle((lx + 8, ly + 10, lx + LW - 8, ly + 138), 10,
+                        outline=(238, 238, 238), width=3)
+    d.text((lx + 26, ly + 26), "Low resin pause", font=_seg(32), fill=(238, 238, 238))
+    d.text((lx + 26, ly + 86), "Off", font=_seg(30), fill=CYAN)
+    d.text((lx + 26, ly + 160), "Low resin warn", font=_seg(32), fill=(238, 238, 238))
+    d.text((lx + 26, ly + 218), "2 ml", font=_seg(30), fill=CYAN)
+
+    # --- tile 2: low-resin warning (red frame, Refilled hint, Back/Start)
+    lx, ly = tile(cols[1], "Low resin warning (UP = Refilled)")
+    d.rounded_rectangle((lx + 4, ly + 4, lx + LW - 4, ly + LH - 4), 10,
+                        outline=RED, width=6)
+    d.text((lx + 28, ly + 30), "Low resin!", font=_seg(38, True), fill=(238, 238, 238))
+    d.rounded_rectangle((lx + 340, ly + 26, lx + 380, ly + 66), 8, fill=CYAN)
+    d.polygon([(lx + 350, ly + 54), (lx + 360, ly + 36), (lx + 370, ly + 54)], fill=(5, 5, 5))
+    d.text((lx + 390, ly + 34), "Refilled", font=_seg(24), fill=CAPTION)
+    d.text((lx + 28, ly + 110), "~1.8 ml left in VAT", font=_seg(32), fill=CYAN)
+    btn(lx + 22, ly + 190, 240, "Back", ORANGE_, (255, 255, 255))
+    btn(lx + 296, ly + 190, 240, "Start", CYAN, (10, 10, 10))
+
+    # --- tile 3: ask-refill before print (orange frame, No/Yes)
+    lx, ly = tile(cols[2], 'Ask before print: "VAT refilled?"')
+    d.rounded_rectangle((lx + 4, ly + 4, lx + LW - 4, ly + LH - 4), 10,
+                        outline=ORANGE_, width=6)
+    d.text((lx + 28, ly + 30), "VAT refilled?", font=_seg(38, True), fill=(238, 238, 238))
+    d.text((lx + 28, ly + 110), "~14.4 ml left now", font=_seg(32), fill=CYAN)
+    btn(lx + 22, ly + 190, 240, "No", ORANGE_, (255, 255, 255))
+    btn(lx + 296, ly + 190, 240, "Yes", CYAN, (10, 10, 10))
+
+    img.save(p)
+    print("  printer-screens.png extended with the toggles/resin row")
+
+
 def draw_dashboard(latest):
     """Full redraw of web-dashboard.png: status grid (incl. resin used/total
     and Resin left), VAT refilled, print controls, SD manager with filter +
@@ -370,6 +439,7 @@ def main():
           [(0, f"FW v{latest}", mono26, (170, 170, 170))], (1800, 1705))
     img.save(p)
     print(f"  {p.name} ok")
+    extend_printer_screens()
 
     # --- web-dashboard.png: full redraw (kept in sync with the real UI) ---
     p = MOCKUPS / "web-dashboard.png"
