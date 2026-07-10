@@ -152,6 +152,86 @@ def draw_update_page(installed, latest):
     return img
 
 
+def draw_dashboard(latest):
+    """Full redraw of web-dashboard.png: status grid (incl. resin used/total
+    and Resin left), VAT refilled, print controls, SD manager with filter +
+    pagination - kept in sync with the real dashboard UI."""
+    WHITE = (238, 238, 238)
+    GRAY = (170, 170, 170)
+    CARD = (42, 42, 46)
+    BTN2 = (58, 58, 64)
+    img = Image.new("RGB", (1120, 1600), (0, 0, 0))
+    d = ImageDraw.Draw(img)
+
+    # browser chrome
+    d.rounded_rectangle((40, 40, 1080, 1560), 26, fill=(28, 28, 30))
+    d.rounded_rectangle((40, 40, 1080, 150), 26, fill=(35, 35, 38))
+    d.rectangle((40, 110, 1080, 150), fill=(28, 28, 30))
+    for cx, col in ((80, (255, 95, 87)), (115, (254, 188, 46)), (150, (40, 200, 64))):
+        d.ellipse((cx - 11, 84, cx + 11, 106), fill=col)
+    d.rounded_rectangle((185, 62, 935, 128), 18, fill=(22, 22, 24))
+    d.rounded_rectangle((205, 74, 247, 116), 9, fill=ORANGE)
+    _center(d, (205, 74, 247, 116), "T", _seg(26, True), (255, 255, 255))
+    d.text((265, 78), "192.168.1.42", font=_seg(27), fill=(200, 200, 205))
+
+    # wrap + title + tabs
+    d.rounded_rectangle((75, 185, 1045, 1530), 16, fill=(35, 35, 38), outline=ORANGE, width=3)
+    d.text((110, 212), "TinyMaker", font=_seg(42, True), fill=ORANGE)
+    d.text((112, 278), f"Firmware {latest}", font=_seg(21), fill=GRAY)
+    for box, label, fill in (((110, 330, 398, 396), "Dashboard", ORANGE),
+                             ((415, 330, 703, 396), "Settings", BTN2),
+                             ((720, 330, 1008, 396), "Update", BTN2)):
+        d.rounded_rectangle(box, 14, fill=fill)
+        _center(d, box, label, _seg(24, True), (255, 255, 255))
+
+    # status card
+    d.rounded_rectangle((110, 430, 1008, 1010), 14, fill=CARD)
+    cells = [("State", "Printing"), ("WiFi", "-58 dBm"),
+             ("Layer", "128 / 350"), ("Resin", "6.2 / ~14.8 ml"),
+             ("Running time", "1h 04m"), ("Remaining time", "2h 08m"),
+             ("SD card", "Locked"), ("Resin left (est.)", "8.6 ml")]
+    for n, (label, value) in enumerate(cells):
+        x = 140 if n % 2 == 0 else 560
+        y = 465 + (n // 2) * 105
+        d.text((x, y), label, font=_seg(19), fill=GRAY)
+        d.text((x, y + 30), value, font=_seg(28), fill=WHITE)
+    # WiFi bars next to -58 dBm
+    for b in range(3):
+        h = 10 + b * 8
+        d.rectangle((700 + b * 16, 525 - h, 710 + b * 16, 525), fill=(60, 200, 90))
+    d.rounded_rectangle((140, 900, 978, 962), 12, fill=BTN2)
+    _center(d, (140, 900, 978, 962), "VAT refilled", _seg(23, True), WHITE)
+
+    # print controls card
+    d.rounded_rectangle((110, 1040, 1008, 1190), 14, fill=CARD)
+    d.text((140, 1065), "Print controls", font=_seg(26, True), fill=WHITE)
+    d.rounded_rectangle((140, 1110, 550, 1168), 12, fill=BTN2)
+    _center(d, (140, 1110, 550, 1168), "Pause", _seg(23, True), WHITE)
+    d.rounded_rectangle((570, 1110, 978, 1168), 12, fill=(122, 44, 44))
+    _center(d, (570, 1110, 978, 1168), "Stop", _seg(23, True), WHITE)
+
+    # SD manager card with filter + pager
+    d.rounded_rectangle((110, 1220, 1008, 1500), 14, fill=CARD)
+    d.text((140, 1245), "SD card", font=_seg(26, True), fill=WHITE)
+    d.rounded_rectangle((140, 1292, 978, 1340), 10, fill=(28, 28, 30), outline=(85, 85, 90), width=2)
+    d.text((160, 1302), "Filter models...", font=_seg(21), fill=(120, 120, 126))
+    d.text((140, 1360), "Benchy", font=_seg(24, True), fill=WHITE)
+    d.text((140, 1394), "Model folder", font=_seg(17), fill=GRAY)
+    d.rounded_rectangle((618, 1362, 738, 1406), 10, fill=BTN2)
+    _center(d, (618, 1362, 738, 1406), "Details", _seg(18, True), WHITE)
+    d.rounded_rectangle((752, 1362, 848, 1406), 10, fill=ORANGE)
+    _center(d, (752, 1362, 848, 1406), "Start", _seg(18, True), (255, 255, 255))
+    d.rounded_rectangle((862, 1362, 978, 1406), 10, fill=(122, 44, 44))
+    _center(d, (862, 1362, 978, 1406), "Delete", _seg(18, True), WHITE)
+    d.rounded_rectangle((140, 1436, 260, 1478), 10, fill=BTN2)
+    _center(d, (140, 1436, 260, 1478), "« Prev", _seg(17, True), WHITE)
+    _center(d, (270, 1436, 350, 1478), "1 / 2", _seg(18), GRAY)
+    d.rounded_rectangle((360, 1436, 480, 1478), 10, fill=BTN2)
+    _center(d, (360, 1436, 480, 1478), "Next »", _seg(17, True), WHITE)
+
+    return img
+
+
 def _pawn_slices(n=36, gw=80, gh=60):
     """Procedural chess-pawn-ish model as boolean slice grids (for the
     preview mockup - looks like a real sliced model without needing one)."""
@@ -271,7 +351,6 @@ def main():
     mono34 = ImageFont.truetype(CONSOLA, 34)
     mono28 = ImageFont.truetype(CONSOLA, 28)
     mono26 = ImageFont.truetype(CONSOLA, 26)
-    seg21 = ImageFont.truetype(SEGOE, 21)
 
     # --- printer-screens.png (2080x1920, 4x3 LCD tile collage) ---
     p = MOCKUPS / "printer-screens.png"
@@ -292,14 +371,10 @@ def main():
     img.save(p)
     print(f"  {p.name} ok")
 
-    # --- web-dashboard.png (1120x1440) ---
+    # --- web-dashboard.png: full redraw (kept in sync with the real UI) ---
     p = MOCKUPS / "web-dashboard.png"
-    img = Image.open(p).convert("RGB")
-    d = ImageDraw.Draw(img)
-    patch(img, d, (110, 276, 330, 304),
-          [(0, f"Firmware {latest}", seg21, (170, 170, 170))], (400, 285))
-    img.save(p)
-    print(f"  {p.name} ok")
+    draw_dashboard(latest).save(p)
+    print(f"  {p.name} ok (regenerated)")
 
     # --- firmware-update-page.png: full redraw of the Update tab ---
     p = MOCKUPS / "firmware-update-page.png"
