@@ -36,6 +36,7 @@ Both files land in `C:/PIO-build/TinyMakerWiFi/tinymaker/`.
 - Version scheme is the fork's own **SemVer** (`FIRMWARE_VERSION` in `platformio.ini`, e.g. `0.7.0`) — the upstream `1.0.2` base is no longer carried in the version string (only noted on the About screen). Bump it per release.
 - The `System → Update` screen shows installed vs. latest and can **self-update**: it fetches `version.txt` from GitHub Pages (`OTA_VERSION_URL` in `Network.ino`) over HTTPS, compares SemVer, and if newer, pulls `firmware.bin` via `httpUpdate` and reboots. The dashboard's Update tab can also install latest, a picked version (`firmware-X.Y.Z.bin` + `versions.txt` manifest on gh-pages) or an uploaded file. Web flashing is gated by `otaWebAllowed()` (idle + Web control on, or the Update screen); dev espota keeps the strict `screen == 421` gate.
 - Releases are automated by [scripts/release.py](scripts/release.py) (checks → build → push+tag → gh-pages incl. manifest → GitHub Release with both .bin assets). Run it with the PlatformIO penv python after bumping `FIRMWARE_VERSION` and committing.
+- README mockup PNGs show version strings; refresh them with [scripts/refresh_mockups.py](scripts/refresh_mockups.py) (patches the text at fixed coordinates, versions from platformio.ini + git tags) before the release commit. Needs Pillow in the penv python.
 - Hosting setup (what to publish on the `gh-pages` branch) is documented in [Firmware_Hosting/](Firmware_Hosting/).
 
 ## Source layout
