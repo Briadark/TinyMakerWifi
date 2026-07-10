@@ -938,6 +938,7 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
+  out += tinymakerConnectConfigJson();
   return out;
 }
 
@@ -971,6 +972,12 @@ void applyConfigRequest() {
   }
   mqttTopic = formString("mqtt_topic", mqttTopic, 64);
   if (mqttTopic.length() == 0) mqttTopic = "TinyMaker";
+  connectEnabled = server.hasArg("connect_enabled");
+  if (!wifiEnabled) connectEnabled = false;
+  connectBaseUrl = connectNormalizeBaseUrl(formString("connect_base_url", connectBaseUrl, 128));
+  connectPrinterName = formString("connect_printer_name", connectPrinterName, 64);
+  if (connectPrinterName.length() == 0) connectPrinterName = "TinyMaker";
+  connectLeaderboardOptIn = connectEnabled && server.hasArg("connect_leaderboard");
 
   savePrintSettings();
   saveDeviceConfig();
@@ -1020,6 +1027,17 @@ void resetMqttConfigToDefaults() {
   saveDeviceConfig();
 }
 
+void resetConnectConfigToDefaults() {
+  connectEnabled = false;
+  connectBaseUrl = "";
+  connectPrinterName = "TinyMaker";
+  connectLeaderboardOptIn = false;
+  connectPrinterPublicId = "";
+  connectPublishToken = "";
+  connectLastStatus = "";
+  saveDeviceConfig();
+}
+
 void handleApiConfigDefaults() {
   if (rejectIfWebControlOff()) return;
   if (printerBusy()) {
@@ -1041,6 +1059,17 @@ void handleApiConfigMqttDefaults() {
   resetMqttConfigToDefaults();
   mqttClient.disconnect();
   mqttDiscoverySent = false;
+  sendApiOk(configJson());
+}
+
+void handleApiConfigConnectDefaults() {
+  if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+
+  resetConnectConfigToDefaults();
   sendApiOk(configJson());
 }
 
@@ -1687,6 +1716,17 @@ void handleRootPage() {
       </div>
       <div id='mqttHint' class='hint'>MQTT publishing will use these settings in the SmartHome integration step.</div>
     </div>
+    <label class='check spanAll'><input name='connect_enabled' id='cfgConnectEnabled' type='checkbox' value='1'><span>Enable TinyMaker Connect</span></label>
+    <div id='connectFields' class='spanAll hidden'>
+      <div class='configGrid'>
+        <label class='spanAll'><span>Connect server URL</span><input name='connect_base_url' id='cfgConnectBaseUrl' type='text' maxlength='128' placeholder='https://connect.example.com'></label>
+        <label><span>Printer display name</span><input name='connect_printer_name' id='cfgConnectPrinterName' type='text' maxlength='64' placeholder='TinyMaker'></label>
+        <label class='check'><input name='connect_leaderboard' id='cfgConnectLeaderboard' type='checkbox' value='1'><span>Share printer stats on leaderboard</span></label>
+      </div>
+      <div id='connectHint' class='hint'>Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.</div>
+      <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
+      <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
+    </div>
     <button id='configSaveButton' class='spanAll' type='submit'>Save config</button>
   </form>
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
@@ -2088,6 +2128,7 @@ const confirmNetworkToggle=e=>{
   updateNetworkFields();
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
+const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
 const loadConfig=async()=>{
   try{
     const c=await api('/api/config');
@@ -2095,9 +2136,12 @@ const loadConfig=async()=>{
     $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
-    updateNetworkFields();updateMqttFields();
+    $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||''; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
+    const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');
+    updateNetworkFields();updateMqttFields();updateConnectFields();
     show('configMqttResetButton',!!c.mqttConfigured);
-    $('configDefaultsButton').textContent=c.mqttConfigured?'Reset to defaults (Excluding MQTT)':'Reset to defaults';
+    show('configConnectResetButton',!!c.connectConfigured);
+    $('configDefaultsButton').textContent=(c.mqttConfigured||c.connectConfigured)?'Reset to defaults (Excluding integrations)':'Reset to defaults';
     const noWc=!c.webDashboardEnabled;
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
@@ -2112,13 +2156,16 @@ $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();f
 
 $('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
-$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('MQTT')>=0;if(!confirm(keep?'Reset config to defaults and keep MQTT settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. MQTT settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!confirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configConnectResetButton').addEventListener('click',async()=>{if(!confirm('Reset TinyMaker Connect settings and forget this printer token?'))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('connectRegisterButton').addEventListener('click',async()=>{if($('cfgConnectLeaderboard').checked&&!confirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||'TinyMaker Connect registered.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('disableDryRunButton').addEventListener('click',async()=>{if(!confirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
 $('vatRefillButton').addEventListener('click',async()=>{if(!confirm('Mark the VAT as refilled? The resin estimate restarts from a full VAT.'))return;try{const r=await api('/api/vat/refilled',{method:'POST'});msg('VAT marked as refilled ('+r.vatRemainingMl+' ml).');refreshStatus();}catch(e){msg(e.message,true);}});
 $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
+$('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
 $('updateViewButton').addEventListener('click',()=>openView('update'));
@@ -2473,7 +2520,9 @@ void network_setup() {
   server.on("/api/config", HTTP_POST, handleApiConfigSave);
   server.on("/api/config/defaults", HTTP_POST, handleApiConfigDefaults);
   server.on("/api/config/mqtt/defaults", HTTP_POST, handleApiConfigMqttDefaults);
+  server.on("/api/config/connect/defaults", HTTP_POST, handleApiConfigConnectDefaults);
   server.on("/api/config/dry-run", HTTP_POST, handleApiConfigDryRun);
+  server.on("/api/connect/register", HTTP_POST, handleApiConnectRegister);
   server.on("/api/print/start", HTTP_POST, handleApiPrintStart);
   server.on("/api/vat/refilled", HTTP_POST, handleApiVatRefilled);
   server.on("/api/update", HTTP_GET, handleApiUpdateGet);
