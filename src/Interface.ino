@@ -70,6 +70,7 @@ String uiFitText(String s, int maxW) {
 
 // Framed two-line status message (used by upload/OTA/import flows)
 void netMessage(const char *line1, const char *line2) {
+  uiWakeScreen();   // network events must be visible even if the UI timed out
   uiFrame(ORANGE);
   gfx2->setFont(&FreeSans8pt7b);
   gfx2->setTextColor(WHITE);
@@ -82,6 +83,7 @@ void netMessage(const char *line1, const char *line2) {
 
 // Two text lines + bounded progress bar (WiFi connect / uploads / OTA / import)
 void netProgressStart(const char *line1, const char *line2) {
+  uiWakeScreen();   // web update/upload progress must wake a blanked screen
   gfx2->fillScreen(BLACK);
   gfx2->setFont(&FreeSans8pt7b);
   gfx2->setTextColor(WHITE);
@@ -333,7 +335,7 @@ bool advancedMqttConfigured() {
 }
 
 int advancedOptionCount() {
-  int count = 5; // screen timeout, dry run, VAT refilled, low resin pause, WiFi
+  int count = 6; // timeout, dry run, VAT refilled, low resin pause+warn, WiFi
   if (wifiEnabled) count++; // web control
   if (wifiEnabled && advancedMqttConfigured()) count++; // MQTT
   return count;
@@ -344,9 +346,10 @@ String advancedLabel(int item) {
   if (item == 2) return "Dry run";
   if (item == 3) return "VAT refilled";
   if (item == 4) return "Low resin pause";
-  if (item == 5) return "WiFi";
-  if (wifiEnabled && item == 6) return "Web control";
-  if (wifiEnabled && advancedMqttConfigured() && item == 7) return "MQTT";
+  if (item == 5) return "Low resin warn";
+  if (item == 6) return "WiFi";
+  if (wifiEnabled && item == 7) return "Web control";
+  if (wifiEnabled && advancedMqttConfigured() && item == 8) return "MQTT";
   return "";
 }
 
@@ -358,9 +361,10 @@ String advancedValue(int item) {
   if (item == 2) return uvLedEnabled ? "Off" : "On";
   if (item == 3) return String(vatRemaining(), 1) + " ml left";
   if (item == 4) return lowResinPauseEnabled ? "On" : "Off";
-  if (item == 5) return wifiEnabled ? "On" : "Off";
-  if (wifiEnabled && item == 6) return webDashboardEnabled ? "On" : "Off";
-  if (wifiEnabled && advancedMqttConfigured() && item == 7) return mqttEnabled ? "On" : "Off";
+  if (item == 5) return String(lowResinThresholdMl) + " ml";
+  if (item == 6) return wifiEnabled ? "On" : "Off";
+  if (wifiEnabled && item == 7) return webDashboardEnabled ? "On" : "Off";
+  if (wifiEnabled && advancedMqttConfigured() && item == 8) return mqttEnabled ? "On" : "Off";
   return "";
 }
 
@@ -414,6 +418,9 @@ void advancedOptionsSelect() {
   } else if (advanced_item == 4) {
     lowResinPauseEnabled = !lowResinPauseEnabled;
   } else if (advanced_item == 5) {
+    lowResinThresholdMl++;      // cycle 1..10 ml
+    if (lowResinThresholdMl > 10) lowResinThresholdMl = 1;
+  } else if (advanced_item == 6) {
     wifiEnabled = !wifiEnabled;
     if (!wifiEnabled) {
       webDashboardEnabled = false;
@@ -421,13 +428,13 @@ void advancedOptionsSelect() {
     } else {
       webDashboardEnabled = true;
     }
-  } else if (wifiEnabled && advanced_item == 6) {
+  } else if (wifiEnabled && advanced_item == 7) {
     webDashboardEnabled = !webDashboardEnabled;
-  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 7) {
+  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 8) {
     mqttEnabled = !mqttEnabled;
   }
   saveDeviceConfig();
-  if (advanced_item == 5) {
+  if (advanced_item == 6) {
     // WiFi state only changes at boot (network_setup has no runtime
     // teardown/bring-up path), so offer a reboot to apply it now.
     screenRebootConfirm();

@@ -142,6 +142,7 @@ Open the printer's IP address in any browser for the full dashboard *(contribute
 | Dry run | Test prints without UV — motion and display only |
 | VAT refilled | Press after refilling resin — restarts the level estimate from a full VAT |
 | Low resin pause | On = the print pauses for a refill when the estimate runs low |
+| Low resin warn | The warning/pause threshold, 1–10 ml (OK cycles) |
 | **WiFi** | **On/Off — the whole network** (web, PrusaSlicer upload, MQTT, self-update) |
 | Web control | On/Off — browser dashboard + slicer upload (MQTT/HA status keeps working) |
 | MQTT | On/Off (shown once MQTT is configured in the dashboard) |
@@ -162,7 +163,7 @@ The printer has no resin sensor — instead it **keeps count**: every printed la
 * **"Resin left (est.)"** is shown on the dashboard; in Home Assistant it appears as a *Resin left* sensor plus a *Resin low* alert you can automate notifications on.
 * **After refilling**, tell the printer: **System → Advanced → VAT refilled** on the printer, or the **VAT refilled** button on the dashboard. The estimate restarts from a full VAT (your VAT size setting).
 * **Before a print starts**, if the level is at/below the warning threshold (or a fresh ml estimate says the model needs more than what's left), the printer shows **"Low resin!"** with the numbers — Start anyway or Back. Starting from the browser asks the same in a dialog.
-* **Low resin pause** (optional, default Off): mid-print, when the level drops to the threshold, the printer finishes the layer, lifts and pauses showing **"Refill VAT!"** — refill, press VAT refilled (dashboard) or just resume. The threshold (`Low resin warn`, 1–10 ml, default 2) is set in the dashboard's Settings tab.
+* **Low resin pause** (optional, default Off): mid-print, when the level drops to the threshold, the printer finishes the layer, lifts and pauses showing **"Refill VAT!"** — refill, press VAT refilled (dashboard) or just resume. The threshold (`Low resin warn`, 1–10 ml, default 2) is set on the printer (System → Advanced) or in the dashboard's Settings tab.
 
 > ⚠️ It is an **estimate**, not a measurement — it doesn't account for resin sticking to models or drips, so treat it as a planning aid and glance at the real VAT now and then. Refills you don't confirm with "VAT refilled" won't be counted.
 

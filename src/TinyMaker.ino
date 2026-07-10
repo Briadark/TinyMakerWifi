@@ -332,6 +332,16 @@ bool printerBusy() {
          screen == 11112 || screen == 11113;
 }
 
+// Wake a blanked (UI-timeout) status screen. Network events call this before
+// drawing - web-started updates/uploads must be visible on the printer.
+void uiWakeScreen() {
+  if (uiBlanked) {
+    uiBlanked = false;
+    ((Arduino_TFT *)gfx2)->displayOn();
+  }
+  lastUiActivityMs = millis();
+}
+
 bool handleUiTimeout() {
   bool buttonPressed = digitalRead(buttonBack) == LOW ||
                        digitalRead(buttonUp) == LOW ||
