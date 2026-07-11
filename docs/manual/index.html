@@ -50,7 +50,9 @@
     border-radius:999px; padding:4px 12px; background:var(--card);
   }
   header.hero h1{font-size:2.1rem; margin:.5rem 0 .2rem; letter-spacing:-.02em}
-  header.hero p.tag{color:var(--muted); font-size:1.05rem; margin:.2rem 0 1.2rem}
+  header.hero p.tag{color:var(--muted); font-size:1.05rem; margin:.2rem 0 .45rem}
+  header.hero p.author{color:var(--muted); font-size:.92rem; margin:0 0 1.2rem}
+  header.hero p.author b{color:var(--text)}
   header.hero img{width:100%; max-width:520px; border-radius:14px; box-shadow:var(--shadow)}
 
   nav.toc{
@@ -138,6 +140,7 @@
   <span class="badge">User Manual · v0.13.5</span>
   <h1>TinyMakerWifi</h1>
   <p class="tag">WiFi, wireless upload &amp; over-the-air updates for the TinyMaker resin printer</p>
+  <p class="author">by <b>Viktoras Sidlauskas</b> · <a href="https://github.com/slibbinas">@slibbinas</a></p>
   <img src="images/Palm_Sized.jpg" alt="The palm-sized TinyMaker MSLA resin 3D printer">
 </header>
 
@@ -160,6 +163,7 @@
     <li><a href="#update">Updating the firmware</a></li>
     <li><a href="#mqtt">Home Assistant (MQTT)</a></li>
     <li><a href="#faq">Troubleshooting &amp; FAQ</a></li>
+    <li><a href="#credits">Credits</a></li>
   </ol>
 </nav>
 
@@ -374,12 +378,22 @@
   <p>System → Advanced → WiFi → Off. The printer behaves like the original firmware; turn WiFi back on in the same place whenever you like.</p>
 </section>
 
+<section>
+  <h2 class="sec" id="credits">Credits</h2>
+  <p><b>TinyMakerWifi</b> — the WiFi, wireless-upload and over-the-air-update firmware described in this manual — is created and maintained by <b>Viktoras Sidlauskas</b> (<a href="https://github.com/slibbinas">@slibbinas</a>).</p>
+  <ul>
+    <li><b>Web dashboard &amp; Advanced menu</b> — contributed by <a href="https://github.com/Briadark">Brian Karmelk (@Briadark)</a>.</li>
+    <li><b>Original TinyMaker firmware &amp; printer</b> — by the <a href="https://tinymaker3d.com/">TinyMaker3D Team</a>.</li>
+    <li>Additional fixes, testing and ideas from the TinyMaker community.</li>
+  </ul>
+  <p>The firmware is MIT-licensed; the TinyMaker hardware is CC BY-NC-SA 4.0. If TinyMakerWifi is useful to you, you can <a href="https://paypal.me/Sidlauskas?locale.x=en_US&amp;country.x=LT">buy me a coffee</a> — thank you!</p>
+</section>
+
 </div>
 
 <footer>
-  <p>TinyMakerWifi · User Manual · v0.13.5<br>
-  Based on the open-source <a href="https://tinymaker3d.com/">TinyMaker 3D printer</a>. Firmware MIT-licensed.<br>
-  Web dashboard &amp; Advanced menu contributed by <a href="https://github.com/Briadark">Brian Karmelk (@Briadark)</a>.</p>
+  <p>TinyMakerWifi · User Manual · v0.13.5 · by Viktoras Sidlauskas<br>
+  Based on the open-source <a href="https://tinymaker3d.com/">TinyMaker 3D printer</a>. Firmware MIT-licensed.</p>
 </footer>
 </body>
 </html>
