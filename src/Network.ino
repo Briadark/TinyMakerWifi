@@ -1547,6 +1547,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:#7b2f2f}.secondaryBtn{background:#3c3c42}"
     "button:disabled{background:#555;color:#aaa;cursor:not-allowed}"
     ".button.secondary{background:#3c3c42;margin-top:10px}"
+    // Full-page lock while a firmware update is in flight; cleared by the
+    // automatic reload once the printer answers status polls again.
+    ".updOverlay{position:fixed;inset:0;z-index:99;background:rgba(20,20,22,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
+    ".updOverlay.on{display:flex}.updOverlay h2{color:#e8720c}"
+    ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
     ".hidden{display:none}"
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
@@ -1593,6 +1598,8 @@ void handleRootPage() {
   <strong>Web control is off - view only.</strong>
   <div>All actions are disabled: print controls, SD changes, uploads, settings and firmware updates. Monitoring and "Send to printer" from the slicer keep working. Enable: printer &rarr; System &rarr; Advanced.</div>
 </section>
+
+<div id='updOverlay' class='updOverlay'><div class='updSpin'></div><h2>Updating firmware</h2><div class='hint'>Do not power off the printer.<br>This page reloads automatically when it is back.</div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1643,7 +1650,7 @@ void handleRootPage() {
     </div>
     <form id='uploadForm'>
       <input id='uploadFile' type='file' name='file' accept='.sl1,.zip' required>
-      <button id='uploadButton' type='submit'>Upload model</button>
+      <button id='uploadButton' class='button secondary' type='submit'>Upload model</button>
     </form>
     <div id='uploadHint' class='hint'>Uploaded SL1/ZIP files are unpacked into printable model folders on the SD card.</div>
     <input id='filesFilter' type='text' class='hidden' placeholder='Filter models...'>
@@ -1728,7 +1735,7 @@ void handleRootPage() {
   <form id='updUploadForm' style='margin-top:14px'>
     <div class='label'>Or upload a firmware.bin from <a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>:</div>
     <input id='updFile' type='file' name='firmware' accept='.bin' disabled required>
-    <button id='updUploadButton' type='submit' disabled>Upload &amp; flash</button>
+    <button id='updUploadButton' class='button secondary' type='submit' disabled>Upload &amp; flash</button>
   </form>
   <div class='hint'>Updates are blocked while printing. Do not power off during an update - the printer reboots by itself when done.</div>
 </section>
@@ -1803,7 +1810,8 @@ const uploadWithProgress=(fd,hintEl)=>{
     xhr.send(fd);
   });
 };
-let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false;
+let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false,updLock=false,updSawDown=false,updLockAt=0;
+const showUpdLock=()=>{updLock=true;updSawDown=false;updLockAt=Date.now();$('updOverlay').classList.add('on');};
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
@@ -1888,11 +1896,14 @@ const refreshStatus=async()=>{
   statusInFlight=true;
   try{
     const s=await api('/api/status',null,30000);
+    if(updLock&&updSawDown)location.reload();
+    if(updLock&&!updSawDown&&Date.now()-updLockAt>90000){updLock=false;$('updOverlay').classList.remove('on');msg('Update did not start - the printer never went down. Check System > Update on the printer.',true);}
     statusFailCount=0;
     applyStatus(s);
     if(!pendingPrintCmd)msg('',false);
   }catch(e){
     statusFailCount++;
+    if(updLock)updSawDown=true;
     if(statusData&&statusData.busy)msg('Syncing with printer at the next safe network window...',true);
     else msg('Status unavailable: '+e.message,true);
   }finally{statusInFlight=false;}
@@ -2128,7 +2139,7 @@ window.deleteFile=deleteFile;
 window.filesNav=d=>{filesPage+=d;renderFiles();};
 $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();filesPage=0;renderFiles();});
 
-$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
+$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadButton').classList.add('secondary');$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('MQTT')>=0;if(!confirm(keep?'Reset config to defaults and keep MQTT settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. MQTT settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
@@ -2192,7 +2203,7 @@ const installFirmware=async v=>{
   let warn='Install '+(v||'the latest firmware')+'? The printer reboots when done.';
   if(v&&updInstalledVer&&cmpVer(v,updInstalledVer)<0)warn='Downgrade to '+v+'? The older firmware may ignore or reset newer settings.\nThe printer reboots when done.';
   if(!confirm(warn))return;
-  try{await api('/api/update/install'+(v?'?version='+v:''),{method:'POST'},20000);msg('Updating... the printer reboots when done.');}catch(e){msg(e.message,true);}
+  try{await api('/api/update/install'+(v?'?version='+v:''),{method:'POST'},20000);msg('Updating... the printer reboots when done.');showUpdLock();}catch(e){msg(e.message,true);}
 };
 $('updInstallLatest').addEventListener('click',()=>installFirmware(''));
 $('updInstallSelected').addEventListener('click',()=>installFirmware($('updVersionSelect').value));
@@ -2204,10 +2215,12 @@ $('updUploadForm').addEventListener('submit',async e=>{
   try{
     const r=await fetch('/update',{method:'POST',body:new FormData(e.target)});
     if(!r.ok)throw new Error('update rejected (HTTP '+r.status+')');
-    msg('Firmware flashed. The printer is rebooting...');
+    msg('Firmware flashed. The printer is rebooting...');showUpdLock();
   }catch(err){msg(err.message,true);}
   $('updUploadButton').disabled=false;
 });
+$('updFile').addEventListener('change',()=>$('updUploadButton').classList.toggle('secondary',!$('updFile').files.length));
+$('uploadFile').addEventListener('change',()=>$('uploadButton').classList.toggle('secondary',!$('uploadFile').files.length));
 
 $('pauseButton').addEventListener('click',()=>printCommand('pause','Pause this print?'));
 $('resumeButton').addEventListener('click',()=>printCommand('resume','Resume this print?'));
