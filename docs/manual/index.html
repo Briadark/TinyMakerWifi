@@ -137,7 +137,7 @@
 <button class="toggle-theme" onclick="(function(){var r=document.documentElement;var d=r.getAttribute('data-theme')==='dark'||(!r.getAttribute('data-theme')&&matchMedia('(prefers-color-scheme:dark)').matches);r.setAttribute('data-theme',d?'light':'dark');})()">◐ Theme</button>
 
 <header class="hero">
-  <span class="badge">User Manual · v0.13.5</span>
+  <span class="badge">User Manual · v0.14.0</span>
   <h1>TinyMakerWifi</h1>
   <p class="tag">WiFi, wireless upload &amp; over-the-air updates for the TinyMaker resin printer</p>
   <p class="author">by <b>Viktoras Sidlauskas</b> · <a href="https://github.com/slibbinas">@slibbinas</a></p>
@@ -217,7 +217,7 @@
     <li>Click <b>Program</b>, wait for it to finish, then power-cycle the printer.</li>
   </ol>
   <div class="note">🔌 <b>Windows doesn’t see the printer?</b> Install the CH340 USB driver (<code>CH341SER.EXE</code>, in the repo’s <code>Driver</code> folder), then try again. The official Espressif Flash Download Tool is an alternative — see the project README for its exact settings (SPI 40&nbsp;MHz / DIO / 4&nbsp;MB, file at <code>0x0</code>).</div>
-  <p>The first boot after flashing takes a few extra seconds and starts the <code>TinyMaker-Setup</code> hotspot. Printer settings (exposure, layer height…) return to factory defaults.</p>
+  <p>The first boot after flashing takes a few extra seconds and starts the <code>TinyMaker-Setup</code> hotspot. Printer settings (exposure, layer height…) return to factory defaults — <b>unless a settings backup is on the SD card</b>: the printer then offers to restore everything on first boot (see <a href="#update">Backup &amp; restore</a>).</p>
 </section>
 
 <section>
@@ -323,6 +323,8 @@
     <tr><td>Low resin warn</td><td>The warning/pause threshold, 1–3&nbsp;ml (OK cycles).</td></tr>
     <tr><td>Ask refill</td><td>On = every print starts with a “VAT refilled?” question.</td></tr>
     <tr><td><b>WiFi</b></td><td><b>On/Off — the whole network</b> (web, PrusaSlicer upload, MQTT, self-update).</td></tr>
+    <tr><td>Boot update</td><td>On = the printer checks for new firmware right after WiFi connects at boot and offers <i>Install / Later</i> on the screen.</td></tr>
+    <tr><td>Exposure test</td><td>Cures an 8-bar calibration strip straight from the printer — each bar gets a different exposure time around your Regular setting. Pick the crispest bar and set its time in Settings. Resin in the vat, no build plate.</td></tr>
     <tr><td>Web control</td><td>On/Off — browser <b>actions</b>. Off = the dashboard turns view-only; slicer upload and MQTT keep working.</td></tr>
     <tr><td>MQTT</td><td>On/Off (shown once MQTT is configured in the dashboard).</td></tr>
   </table>
@@ -345,7 +347,17 @@
     <li><b>For developers:</b> PlatformIO OTA via the <code>tinymaker-ota</code> environment (open System → Update on the printer first — that path keeps the strict gate).</li>
   </ul>
   <img class="shot" src="images/firmware-update-page.png" alt="The dashboard Update tab: installed vs latest, install latest, version picker and file upload">
+  <p>Two comforts while updating: the printer also <b>checks by itself</b> — shortly after WiFi connects at boot it looks for a newer version and shows <i>“Update available — Install / Later”</i> on the screen (choosing Later offers to turn the check off; the switch lives in System → Advanced → Boot update and in dashboard Settings). And when you start an install from the browser, the dashboard locks under an <b>“Updating firmware”</b> overlay and <b>reloads itself</b> when the printer is back — no guessing whether it finished.</p>
   <div class="note">✅ <b>Don’t worry about a failed update.</b> The printer keeps two firmware copies (dual OTA partition), so a failed flash falls back to the previous one. Just don’t power off mid-update.</div>
+
+  <h3>Backup &amp; restore</h3>
+  <p>Everything you have configured — print settings, device toggles, MQTT, even the lifetime print and UV LED counters — fits in one backup file. In the dashboard’s <b>Settings</b> tab:</p>
+  <ul>
+    <li><b>Download backup</b> — saves <code>tinymaker-backup.json</code> to your computer.</li>
+    <li><b>Backup to SD</b> — stores the file on the printer’s SD card. <b>Do this before a full USB reflash:</b> the reflash wipes all settings, but on the first boot the printer finds the backup on the SD card and asks <i>“Restore settings from SD backup?”</i> — one press and everything is back.</li>
+    <li><b>Restore from file</b> — applies an uploaded backup at any time.</li>
+  </ul>
+  <div class="note">💡 WiFi credentials are managed separately (by the WiFi setup portal) and are <b>not</b> in the backup — after a full USB reflash you reconnect to WiFi once, everything else restores. The backup includes your MQTT password, so treat the file accordingly.</div>
 </section>
 
 <section>
@@ -374,6 +386,9 @@
   <h3>A firmware update failed</h3>
   <p>The dual OTA partition keeps the previous firmware, so the printer should still boot. Try again from System → Update, or upload a <code>firmware.bin</code> from the dashboard’s Update tab.</p>
 
+  <h3>How do I keep my settings through a USB reflash?</h3>
+  <p>Before flashing: dashboard → Settings → <b>Backup to SD</b>. After the reflash the printer finds the backup on the SD card and offers to restore it on first boot. Only WiFi needs to be set up again.</p>
+
   <h3>How do I go fully offline?</h3>
   <p>System → Advanced → WiFi → Off. The printer behaves like the original firmware; turn WiFi back on in the same place whenever you like.</p>
 </section>
@@ -392,7 +407,7 @@
 </div>
 
 <footer>
-  <p>TinyMakerWifi · User Manual · v0.13.5 · by Viktoras Sidlauskas<br>
+  <p>TinyMakerWifi · User Manual · v0.14.0 · by Viktoras Sidlauskas<br>
   Based on the open-source <a href="https://tinymaker3d.com/">TinyMaker 3D printer</a>. Firmware MIT-licensed.</p>
 </footer>
 </body>

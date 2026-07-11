@@ -1653,7 +1653,7 @@ void handleRootPage() {
 #endif
   static const char rootBodyBeforeFw[] PROGMEM = R"SPA(
 <div class='head'><div><h1>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
-  static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span></div></div></div>
+  static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span> · <a href='https://slibbinas.github.io/TinyMakerWifi/manual/' target='_blank' rel='noopener'>Manual</a></div></div></div>
 
 <section id='dryRunBanner' class='card banner hidden'>
   <strong>Dry run mode enabled.</strong>
