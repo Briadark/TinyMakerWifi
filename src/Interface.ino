@@ -335,7 +335,7 @@ bool advancedMqttConfigured() {
 }
 
 int advancedOptionCount() {
-  int count = 8; // timeout, dry run, VAT refilled, pause, warn, ask, WiFi, boot update
+  int count = 9; // timeout, dry run, VAT refilled, pause, warn, ask, WiFi, boot update, exposure test
   if (wifiEnabled) count++; // web control
   if (wifiEnabled && advancedMqttConfigured()) count++; // MQTT
   return count;
@@ -350,8 +350,9 @@ String advancedLabel(int item) {
   if (item == 6) return "Ask refill";
   if (item == 7) return "WiFi";
   if (item == 8) return "Boot update";
-  if (wifiEnabled && item == 9) return "Web control";
-  if (wifiEnabled && advancedMqttConfigured() && item == 10) return "MQTT";
+  if (item == 9) return "Exposure test";
+  if (wifiEnabled && item == 10) return "Web control";
+  if (wifiEnabled && advancedMqttConfigured() && item == 11) return "MQTT";
   return "";
 }
 
@@ -367,8 +368,9 @@ String advancedValue(int item) {
   if (item == 6) return askRefillEnabled ? "On" : "Off";
   if (item == 7) return wifiEnabled ? "On" : "Off";
   if (item == 8) return bootUpdateCheckEnabled ? "On" : "Off";
-  if (wifiEnabled && item == 9) return webDashboardEnabled ? "On" : "Off";
-  if (wifiEnabled && advancedMqttConfigured() && item == 10) return mqttEnabled ? "On" : "Off";
+  if (item == 9) return String(expTestBarSecs(1)) + "-" + String(expTestBarSecs(8)) + "s strip";
+  if (wifiEnabled && item == 10) return webDashboardEnabled ? "On" : "Off";
+  if (wifiEnabled && advancedMqttConfigured() && item == 11) return mqttEnabled ? "On" : "Off";
   return "";
 }
 
@@ -436,9 +438,12 @@ void advancedOptionsSelect() {
     }
   } else if (advanced_item == 8) {
     bootUpdateCheckEnabled = !bootUpdateCheckEnabled;
-  } else if (wifiEnabled && advanced_item == 9) {
+  } else if (advanced_item == 9) {
+    screenExpTestIntro();       // action item: opens the exposure test flow
+    return;
+  } else if (wifiEnabled && advanced_item == 10) {
     webDashboardEnabled = !webDashboardEnabled;
-  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 10) {
+  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 11) {
     mqttEnabled = !mqttEnabled;
   }
   saveDeviceConfig();
@@ -1813,9 +1818,106 @@ void screen23111(){
     gfx2->setCursor(50, 43);
     gfx2->print("Done! :)");
     delay(600);  
-    digitalWrite(FAN, LOW);    
+    digitalWrite(FAN, LOW);
   }
   screen2311();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Exposure calibration test (Advanced menu, screens 232/2321). Cures an
+ * 8-bar strip straight from the masking LCD - no slicer, no SD. Bar N stays
+ * lit for its own time on a ladder around the configured Regular exposure
+ * (bar 1 shortest, bar 8 longest); the user picks the bar that cured crisply
+ * and dials that time into Settings.
+ */
+int expTestBarSecs(int bar) {          // bar 1..8 -> seconds
+  int t = Regular_Exposure - 8 + bar * 2;
+  return t < 2 ? 2 : t;
+}
+
+void screenExpTestIntro(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 18);
+  gfx2->print("Exposure test strip");
+  gfx2->setTextColor(0x879F);
+  gfx2->setCursor(8, 34);
+  gfx2->print("Resin in vat, no plate.");
+  gfx2->setCursor(8, 48);
+  gfx2->print(String("Cures 8 bars: ") + expTestBarSecs(1) + "-" + expTestBarSecs(8) + "s");
+  uiButtons("Back", "Start", 0x879F);
+  screen = 232;
+}
+
+void runExpTest(){
+  // Running screen - modeled on the Clean Resin Vat exposure (23111)
+  gfx2->fillScreen(BLACK);
+  gfx2->fillRoundRect(0, 0, 160, 80, 5, ORANGE);
+  gfx2->fillRect(2, 20, 156, 34, BLACK);
+  gfx2->fillRoundRect(2, 56, 156, 22, 3, BLACK);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(6, 14);
+  gfx2->print("Exposure test");
+  gfx2->fillRoundRect(6, 58, 72, 18, 2, ORANGE);
+  gfx2->setCursor(16, 71);
+  gfx2->println("Cancel");
+
+  // 8 vertical bars on the masking LCD; one continuous exposure, the
+  // shortest bar is blanked first, so bar N's lit time = its ladder step.
+  int W = gfx1->width(), H = gfx1->height();
+  int slot = W / 8, gap = slot / 6, bw = slot - 2 * gap;
+  int by = H / 6, bh = H - 2 * (H / 6);
+  gfx1->fillScreen(BLACK);
+  for (int i = 0; i < 8; i++)
+    gfx1->fillRect(i * slot + gap, by, bw, bh, WHITE);
+
+  long maxMs = (long)expTestBarSecs(8) * 1000L;
+  int blanked = 0;
+  bool canceled = false;
+  digitalWrite(FAN, HIGH);
+  digitalWrite(LED, uvLedEnabled ? HIGH : LOW);
+  startTime = millis();
+  Duration = 0;
+  while (Duration <= maxMs && !canceled){
+    Duration = millis() - startTime;
+    while (blanked < 8 && Duration >= (long)expTestBarSecs(blanked + 1) * 1000L){
+      gfx1->fillRect(blanked * slot + gap, by, bw, bh, BLACK);
+      blanked++;
+    }
+    if (digitalRead(buttonBack) == LOW) canceled = true;
+    gfx2->fillRect(2, 20, 156 * Duration / maxMs, 34, PURPLE);
+  }
+  gfx1->fillScreen(BLACK);
+  digitalWrite(LED, LOW);
+  digitalWrite(FAN, LOW);
+  if (uvLedEnabled) {                 // LED aging: test exposures count too
+    totalUvLedSecs += Duration / 1000UL;
+    saveUvLedTime();
+  }
+
+  // Result screen: what the bars mean, left to right
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 18);
+  gfx2->print(canceled ? "Test canceled" : "Test strip done");
+  if (!canceled){
+    gfx2->setTextColor(0x879F);
+    gfx2->setCursor(8, 34);
+    gfx2->print(String("Bars L to R: ") + expTestBarSecs(1) + ".." + expTestBarSecs(8) + "s");
+    gfx2->setCursor(8, 48);
+    gfx2->print("Set crispest in Settings");
+  }
+  uiButtons("Back", "OK", 0x879F);
+  screen = 2321;
 }
 
 

@@ -956,6 +956,10 @@ void loop() {
       case 426:                 // SD settings restore prompt -> Skip
         finishRestorePromptBoot();
         break;
+      case 232:                 // exposure test intro -> back to Advanced
+      case 2321:                // exposure test result -> back to Advanced
+        screenAdvancedOptions();
+        break;
       case 431:
       screen41();
       screen44();
@@ -1656,6 +1660,12 @@ void loop() {
       case 426:                 // SD settings restore prompt -> Restore
         screenRestoreDone(restoreFromSdBackup());
         finishRestorePromptBoot();
+        break;
+      case 232:                 // exposure test intro -> Start
+        runExpTest();
+        break;
+      case 2321:                // exposure test result -> back to Advanced
+        screenAdvancedOptions();
         break;
       case 441:
         advancedOptionsSelect();
