@@ -1404,7 +1404,13 @@ void handleApiStatus() {
   double statusResinMl = busy ? resinUsedMl : 0.0;
 
   String out = "{";
-  out += "\"busy\":";
+  out += "\"firmwareVersion\":\"";
+#ifdef FIRMWARE_VERSION
+  out += jsonEscape(FIRMWARE_VERSION);
+#else
+  out += "unknown";
+#endif
+  out += "\",\"busy\":";
   out += busy ? "true" : "false";
   out += ",\"paused\":";
   out += print_paused ? "true" : "false";
@@ -1809,6 +1815,13 @@ const uploadWithProgress=(fd,hintEl)=>{
   });
 };
 let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false;
+const pageFirmwareVersion=()=>$('fwVersion').textContent.trim();
+const reloadIfFirmwareChanged=s=>{
+  const live=String(s.firmwareVersion||'').trim(),page=pageFirmwareVersion();
+  if(!live||!page||live===page)return false;
+  location.replace('/?fw='+encodeURIComponent(live)+'&r='+Date.now());
+  return true;
+};
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
@@ -1893,6 +1906,7 @@ const refreshStatus=async()=>{
   statusInFlight=true;
   try{
     const s=await api('/api/status',null,30000);
+    if(reloadIfFirmwareChanged(s))return;
     statusFailCount=0;
     applyStatus(s);
     if(!pendingPrintCmd)msg('',false);
