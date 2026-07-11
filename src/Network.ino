@@ -456,6 +456,9 @@ uint32_t currentRunSecs() {
   return (millis() - printStartMs) / 1000UL;
 }
 
+// Lifetime LED-on seconds, live: persisted total + the running print's session.
+uint32_t currentUvLedSecs() { return totalUvLedSecs + uvLedSessionMs / 1000UL; }
+
 uint32_t remainingPrintSecs() {
   if (!printerBusy() || layer_counter <= 0) return 0;
   long layersLeft = layer_counter - current_layer;
@@ -1446,6 +1449,10 @@ void handleApiStatus() {
   out += String(totalPrintSecs);
   out += ",\"lifetimePrintTime\":\"";
   out += formatDuration(totalPrintSecs);
+  out += "\",\"uvLedSecs\":";
+  out += String(currentUvLedSecs());
+  out += ",\"uvLedTime\":\"";
+  out += formatDuration(currentUvLedSecs());
   out += "\",\"model\":\"";
   out += busy ? jsonEscape(String(foldersel_long)) : String("");
   out += "\",\"currentLayer\":";
@@ -1624,6 +1631,7 @@ void handleRootPage() {
       <div><div class='label'>WiFi</div><div class='value'><span id='wifiValue'>-</span><span id='wifiBars' class='wbars'><i></i><i></i><i></i></span></div></div>
       <div><div class='label'>IP</div><div id='ipValue' class='value'>-</div></div>
       <div><div class='label'>Lifetime print time</div><div id='lifetimeValue' class='value'>-</div></div>
+      <div><div class='label'>UV LED time</div><div id='uvLedValue' class='value'>-</div></div>
       <div><div class='label'>SD card</div><div id='sdValue' class='value'>-</div></div>
       <div><div class='label'>Resin left (est.)</div><div id='vatValue' class='value'>-</div></div>
       <div id='printLayerBox' class='hidden'><div class='label'>Layer</div><div id='layerValue' class='value'>-</div></div>
@@ -1848,7 +1856,7 @@ const applyStatus=s=>{
     if(s.busy&&typeof s.runSecs==='number'){const c=Date.now()-s.runSecs*1000;if(!lpsSynced||c<localPrintStartedAt){localPrintStartedAt=c;lpsSynced=true;}}
     if(!s.busy){localPrintStartedAt=0;lpsSynced=false;}
     if((pendingPrintCmd==='stop'&&s.stopping)||(pendingPrintCmd==='pause'&&(s.pausing||s.paused))||(pendingPrintCmd==='resume'&&s.resuming))pendingPrintCmd='';
-    setText('stateValue',s.state); setText('wifiValue',s.wifiText); setText('ipValue',s.ip); setText('lifetimeValue',s.lifetimePrintTime); setText('sdValue',s.sdText);
+    setText('stateValue',s.state); setText('wifiValue',s.wifiText); setText('ipValue',s.ip); setText('lifetimeValue',s.lifetimePrintTime); setText('uvLedValue',s.uvLedTime||'-'); setText('sdValue',s.sdText);
     if(typeof s.freeHeap==='number'){const u=s.uptimeSecs||0,ud=Math.floor(u/86400),uh=Math.floor(u%86400/3600),um=Math.floor(u%3600/60);setText('debugValue','heap '+Math.round(s.freeHeap/1024)+'k | min '+Math.round(s.minFreeHeap/1024)+'k | blk '+Math.round(s.maxAllocHeap/1024)+'k | up '+(ud?ud+'d ':'')+uh+'h '+um+'m');}
     const wb=$('wifiBars').children,wr=s.wifiRssi,wn=(wr&&wr<0)?(wr>-60?3:(wr>-75?2:1)):0;for(let i=0;i<3;i++)wb[i].classList.toggle('on',i<wn);
     setText('layerValue',s.layerText); setText('resinValue',s.resinText); setText('runValue',s.runTime); setText('remainingValue',s.remainingTime);

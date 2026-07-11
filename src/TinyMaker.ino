@@ -96,6 +96,9 @@ void resetSettingsToDefault();
 // flash wear. A power loss mid-print loses that session's time (accepted).
 Preferences sysPrefs;
 uint32_t totalPrintSecs = 0;        // lifetime printing seconds (loaded in setup)
+uint32_t totalUvLedSecs = 0;        // lifetime UV LED on-time seconds - the LED ages by
+                                    // lit time, not print time (dry runs don't count)
+unsigned long uvLedSessionMs = 0;   // this print's LED-on ms, folded in at savePrintTime
 unsigned long printStartMs = 0;     // millis() when the current print started
 uint16_t uiTimeoutSecs = 0;         // 0 = never blank the UI screen
 bool uvLedEnabled = true;           // false = dry-run motion/display only
@@ -115,14 +118,25 @@ bool uiBlanked = false;
 
 void savePrintTime() {
   totalPrintSecs += (millis() - printStartMs) / 1000UL;
+  totalUvLedSecs += uvLedSessionMs / 1000UL;
+  uvLedSessionMs = 0;
   sysPrefs.begin("tinymaker", false);
   sysPrefs.putULong("printSecs", totalPrintSecs);
+  sysPrefs.putULong("uvLedSecs", totalUvLedSecs);
+  sysPrefs.end();
+}
+
+// One-off write for LED time outside prints (Clean Resin Vat exposure).
+void saveUvLedTime() {
+  sysPrefs.begin("tinymaker", false);
+  sysPrefs.putULong("uvLedSecs", totalUvLedSecs);
   sysPrefs.end();
 }
 
 void loadDeviceConfig() {
   sysPrefs.begin("tinymaker", true);
   totalPrintSecs = sysPrefs.getULong("printSecs", 0);
+  totalUvLedSecs = sysPrefs.getULong("uvLedSecs", 0);
   uiTimeoutSecs = sysPrefs.getUShort("uiTimeout", 0);
   uvLedEnabled = sysPrefs.getBool("uvLed", true);
   wifiEnabled = sysPrefs.getBool("wifiEnabled", true);
@@ -1011,6 +1025,7 @@ void loop() {
         startFromResin = false;   // consume the resin-screen Start request
         webStartPrint = false;    // consume the web SD-manager Start request
         printStartMs = millis();  // print-hours accounting (incl. pauses)
+        uvLedSessionMs = 0;
         homing_canceled = false;
         print_paused = false;
         print_canceled = false;

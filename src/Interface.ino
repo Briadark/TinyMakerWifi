@@ -695,9 +695,17 @@ void screen431(){
   gfx2->print("h ");
   gfx2->print((totalPrintSecs % 3600UL) / 60UL);
   gfx2->print("m");
-  gfx2->setCursor(5, 60);
+  gfx2->setCursor(5, 56);
+  gfx2->setTextColor(0x879F);
+  gfx2->print("UV LED: ");
+  gfx2->setTextColor(WHITE);
+  gfx2->print(totalUvLedSecs / 3600UL);
+  gfx2->print("h ");
+  gfx2->print((totalUvLedSecs % 3600UL) / 60UL);
+  gfx2->print("m");
+  gfx2->setCursor(5, 67);
   gfx2->print("github.com/slibbinas/");
-  gfx2->setCursor(5, 71);
+  gfx2->setCursor(5, 77);
   gfx2->print("TinyMakerWifi");
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
   screen = 431;
@@ -1753,6 +1761,10 @@ void screen23111(){
     }    
     // Update Progress Bar
     gfx2->fillRect(2, 20, 156*Duration/ExposureMillis, 34, PURPLE);
+  }
+  if (uvLedEnabled) {  // LED aging: cleaning exposures count too
+    totalUvLedSecs += Duration / 1000UL;
+    saveUvLedTime();
   }
   if(buttonBackClicked == 0){
     gfx1->fillScreen(BLACK);
