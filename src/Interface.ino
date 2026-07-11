@@ -728,7 +728,7 @@ void screen431(){
   gfx2->print("h ");
   gfx2->print((totalPrintSecs % 3600UL) / 60UL);
   gfx2->print("m");
-  gfx2->setCursor(5, 56);
+  gfx2->setCursor(5, 55);
   gfx2->setTextColor(0x879F);
   gfx2->print("UV LED: ");
   gfx2->setTextColor(WHITE);
@@ -736,9 +736,11 @@ void screen431(){
   gfx2->print("h ");
   gfx2->print((totalUvLedSecs % 3600UL) / 60UL);
   gfx2->print("m");
-  gfx2->setCursor(5, 67);
+  // Classic-font setCursor() y is the glyph TOP (7 px tall): the last row
+  // must start by y=73 or it clips past the 80 px panel edge.
+  gfx2->setCursor(5, 64);
   gfx2->print("github.com/slibbinas/");
-  gfx2->setCursor(5, 77);
+  gfx2->setCursor(5, 73);
   gfx2->print("TinyMakerWifi");
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
   screen = 431;
