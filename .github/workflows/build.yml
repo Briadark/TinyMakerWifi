@@ -1,0 +1,42 @@
+name: build
+
+# Compile both firmware environments on every push and pull request.
+# This is a build check only - it never uploads or releases (releases stay
+# local via scripts/release.py). Its main value: contributor PRs are verified
+# automatically before review, and no commit can silently break the build.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # platformio.ini pins build_dir to a Windows path (C:/PIO-build/...) to
+      # keep build output off the dev machine's Google Drive. Override it here
+      # so the Linux runner uses a normal in-workspace directory.
+      PLATFORMIO_BUILD_DIR: .pio/build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build both environments
+        run: pio run

@@ -1248,6 +1248,10 @@ void mqttPublishDiscovery() {
                            "\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"state_class\":\"measurement\"");
   mqttPublishDiscoveryItem("sensor", "remaining_time_sec", "Remaining time", base + "/print/remaining_time_sec",
                            "\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"state_class\":\"measurement\"");
+  // Lowest free heap since boot - HA graphs it during soak tests (a slow
+  // decline = leak). Diagnostic category keeps it out of the main card.
+  mqttPublishDiscoveryItem("sensor", "min_free_heap", "Min free heap", base + "/system/min_free_heap",
+                           "\"unit_of_measurement\":\"B\",\"state_class\":\"measurement\",\"entity_category\":\"diagnostic\"");
   mqttDiscoverySent = true;
 }
 
@@ -1274,6 +1278,7 @@ void mqttPublishStatus() {
                  vatRemaining() <= (float)lowResinThresholdMl ? "ON" : "OFF", true);
   mqttPublishRaw(base + "/print/running_time_sec", String(currentRunSecs()), true);
   mqttPublishRaw(base + "/print/remaining_time_sec", String(remainingPrintSecs()), true);
+  mqttPublishRaw(base + "/system/min_free_heap", String(ESP.getMinFreeHeap()), true);
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -1501,6 +1506,17 @@ void handleApiStatus() {
   out += ",\"vatText\":\"";
   out += String(vatRemaining(), 1) + " ml\",\"vatLow\":";
   out += (vatRemaining() <= (float)lowResinThresholdMl) ? "true" : "false";
+  // Heap/uptime instrumentation - the 1.0.0 stability yardstick.
+  // minFreeHeap = lowest free heap since boot (leak detector);
+  // maxAllocHeap = largest allocatable block (fragmentation indicator).
+  out += ",\"freeHeap\":";
+  out += String(ESP.getFreeHeap());
+  out += ",\"minFreeHeap\":";
+  out += String(ESP.getMinFreeHeap());
+  out += ",\"maxAllocHeap\":";
+  out += String(ESP.getMaxAllocHeap());
+  out += ",\"uptimeSecs\":";
+  out += String(millis() / 1000UL);
   out += "}";
 
   server.send(200, "application/json", out);
@@ -1635,6 +1651,7 @@ void handleRootPage() {
       <div id='printRemainingBox' class='hidden'><div class='label'>Remaining time</div><div id='remainingValue' class='value'>-</div></div>
     </div>
     <div id='statusMsg' class='hint'></div>
+    <div id='debugValue' class='meta'></div>
     <button id='vatRefillButton' class='button secondary' type='button'>VAT refilled</button>
   </section>
 
@@ -1881,7 +1898,7 @@ const uploadWithProgress=(fd,hintEl)=>{
     xhr.send(fd);
   });
 };
-let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,uploadBusy=false;
+let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false;
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
@@ -1900,10 +1917,11 @@ const openView=view=>{
 
 const applyStatus=s=>{
     const was=statusData&&statusData.busy; statusData=s;
-    if(s.busy&&typeof s.runSecs==='number')localPrintStartedAt=Date.now()-s.runSecs*1000;
-    if(!s.busy)localPrintStartedAt=0;
+    if(s.busy&&typeof s.runSecs==='number'){const c=Date.now()-s.runSecs*1000;if(!lpsSynced||c<localPrintStartedAt){localPrintStartedAt=c;lpsSynced=true;}}
+    if(!s.busy){localPrintStartedAt=0;lpsSynced=false;}
     if((pendingPrintCmd==='stop'&&s.stopping)||(pendingPrintCmd==='pause'&&(s.pausing||s.paused))||(pendingPrintCmd==='resume'&&s.resuming))pendingPrintCmd='';
     setText('stateValue',s.state); setText('wifiValue',s.wifiText); setText('ipValue',s.ip); setText('lifetimeValue',s.lifetimePrintTime); setText('sdValue',s.sdText);
+    if(typeof s.freeHeap==='number'){const u=s.uptimeSecs||0,ud=Math.floor(u/86400),uh=Math.floor(u%86400/3600),um=Math.floor(u%3600/60);setText('debugValue','heap '+Math.round(s.freeHeap/1024)+'k · min '+Math.round(s.minFreeHeap/1024)+'k · blk '+Math.round(s.maxAllocHeap/1024)+'k · up '+(ud?ud+'d ':'')+uh+'h '+um+'m');}
     const wb=$('wifiBars').children,wr=s.wifiRssi,wn=(wr&&wr<0)?(wr>-60?3:(wr>-75?2:1)):0;for(let i=0;i<3;i++)wb[i].classList.toggle('on',i<wn);
     setText('layerValue',s.layerText); setText('resinValue',s.resinText); setText('runValue',s.runTime); setText('remainingValue',s.remainingTime);
     setText('vatValue',s.vatLow?s.vatText+' (low!)':s.vatText); $('vatValue').style.color=s.vatLow?'#ff6b5f':'';
@@ -2337,7 +2355,7 @@ const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||e
   try{
   const r=await api('/api/print/start?name='+enc(name)+(force?'&force=1':''),{method:'POST'},8000);
   if(r&&r.warning==='low_resin'){if(confirm('Low resin: ~'+r.vatRemainingMl+' ml left in the VAT (estimate).\nStart anyway?'))startPrint(nameEnc,true);return;}
-  msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
+  msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();lpsSynced=false;applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
 const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!confirm('Delete this SD item?'))return;try{await api('/api/files/delete?name='+enc(name),{method:'POST'});msg('Deleted '+name+'.');loadFiles();}catch(e){msg(e.message,true);}};
 const printCommand=async(cmd,confirmText)=>{if(confirmText&&!confirm(confirmText))return;pendingPrintCmd=cmd;applyPendingPrintUi();msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for printer connection...',true);retryPendingPrintCommand();};
 const tickLocalStatus=()=>{
