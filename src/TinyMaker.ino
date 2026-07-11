@@ -109,6 +109,13 @@ uint16_t mqttPort = 1883;
 String mqttUser = "";
 String mqttPass = "";
 String mqttTopic = "TinyMaker";
+bool connectEnabled = false;        // TinyMaker Connect web-service integration
+String connectBaseUrl = "https://tinymaker.inductie.nu";
+String connectPrinterName = "TinyMaker";
+bool connectLeaderboardOptIn = false;
+String connectPrinterPublicId = "";
+String connectPublishToken = "";
+String connectLastStatus = "";
 unsigned long lastUiActivityMs = 0;
 bool uiBlanked = false;
 
@@ -132,6 +139,12 @@ void loadDeviceConfig() {
   mqttUser = sysPrefs.getString("mqttUser", "");
   mqttPass = sysPrefs.getString("mqttPass", "");
   mqttTopic = sysPrefs.getString("mqttTopic", "TinyMaker");
+  connectEnabled = sysPrefs.getBool("tmcEnabled", false);
+  connectBaseUrl = sysPrefs.getString("tmcUrl", "https://tinymaker.inductie.nu");
+  connectPrinterName = sysPrefs.getString("tmcName", "TinyMaker");
+  connectLeaderboardOptIn = sysPrefs.getBool("tmcLeaderboard", false);
+  connectPrinterPublicId = sysPrefs.getString("tmcPublicId", "");
+  connectPublishToken = sysPrefs.getString("tmcToken", "");
   vatRemainingMl = sysPrefs.getFloat("vatRemMl", -1);
   lowResinPauseEnabled = sysPrefs.getBool("lowResinOn", false);
   lowResinThresholdMl = sysPrefs.getUChar("lowResinMl", 2);
@@ -153,6 +166,12 @@ void saveDeviceConfig() {
   sysPrefs.putString("mqttUser", mqttUser);
   sysPrefs.putString("mqttPass", mqttPass);
   sysPrefs.putString("mqttTopic", mqttTopic);
+  sysPrefs.putBool("tmcEnabled", connectEnabled);
+  sysPrefs.putString("tmcUrl", connectBaseUrl);
+  sysPrefs.putString("tmcName", connectPrinterName);
+  sysPrefs.putBool("tmcLeaderboard", connectLeaderboardOptIn);
+  sysPrefs.putString("tmcPublicId", connectPrinterPublicId);
+  sysPrefs.putString("tmcToken", connectPublishToken);
   sysPrefs.putBool("lowResinOn", lowResinPauseEnabled);
   sysPrefs.putUChar("lowResinMl", lowResinThresholdMl);
   sysPrefs.putBool("askRefill", askRefillEnabled);

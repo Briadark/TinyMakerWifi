@@ -938,6 +938,7 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
+  out += tinymakerConnectConfigJson();
   return out;
 }
 
@@ -971,6 +972,12 @@ void applyConfigRequest() {
   }
   mqttTopic = formString("mqtt_topic", mqttTopic, 64);
   if (mqttTopic.length() == 0) mqttTopic = "TinyMaker";
+  connectEnabled = server.hasArg("connect_enabled");
+  if (!wifiEnabled) connectEnabled = false;
+  connectBaseUrl = connectNormalizeBaseUrl(formString("connect_base_url", connectBaseUrl, 128));
+  connectPrinterName = formString("connect_printer_name", connectPrinterName, 64);
+  if (connectPrinterName.length() == 0) connectPrinterName = "TinyMaker";
+  connectLeaderboardOptIn = connectEnabled && server.hasArg("connect_leaderboard");
 
   savePrintSettings();
   saveDeviceConfig();
@@ -1020,6 +1027,17 @@ void resetMqttConfigToDefaults() {
   saveDeviceConfig();
 }
 
+void resetConnectConfigToDefaults() {
+  connectEnabled = false;
+  connectBaseUrl = "https://tinymaker.inductie.nu";
+  connectPrinterName = "TinyMaker";
+  connectLeaderboardOptIn = false;
+  connectPrinterPublicId = "";
+  connectPublishToken = "";
+  connectLastStatus = "";
+  saveDeviceConfig();
+}
+
 void handleApiConfigDefaults() {
   if (rejectIfWebControlOff()) return;
   if (printerBusy()) {
@@ -1041,6 +1059,17 @@ void handleApiConfigMqttDefaults() {
   resetMqttConfigToDefaults();
   mqttClient.disconnect();
   mqttDiscoverySent = false;
+  sendApiOk(configJson());
+}
+
+void handleApiConfigConnectDefaults() {
+  if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+
+  resetConnectConfigToDefaults();
   sendApiOk(configJson());
 }
 
@@ -1507,6 +1536,12 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "border-top:1px solid #3a3a3f;padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
     ".rowActions{display:flex;gap:8px;align-items:center}"
     ".meta{font-size:12px;color:#aaa;margin-top:3px}"
+    ".connectTiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}"
+    ".connectTile{background:#202024;border:1px solid #3a3a3f;border-radius:8px;padding:12px;text-decoration:none;color:#eee}.connectTile>a{display:block;color:inherit;text-decoration:none}"
+    ".connectTile:hover{border-color:#e8720c;text-decoration:none}.connectPreview{aspect-ratio:4/3;background:#151517;border:1px solid #3a3a3f;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:10px}"
+    ".connectPreview img{width:100%;height:100%;object-fit:contain}.connectStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}"
+    ".connectStat{border-top:1px solid #3a3a3f;padding-top:7px}.pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.pill{border:1px solid #3a3a3f;border-radius:999px;padding:3px 8px;color:#aaa;font-size:12px}"
+    ".connectActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}"
     "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}a:visited{color:#84bcf8}"
     "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
     "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
@@ -1542,7 +1577,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "@media(min-width:1000px){.wrap{max-width:1100px}"
     "#homeView:not(.hidden){display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}"
     "#homeView .card{margin:0}"
-    "#modelPanel,#configView,#updateView,#dryRunBanner,#webControlBanner{max-width:760px;margin-left:auto;margin-right:auto}}"
+    "#modelPanel,#connectView,#configView,#updateView,#dryRunBanner,#webControlBanner{max-width:760px;margin-left:auto;margin-right:auto}}"
     "</style></head><body><main class='wrap'>"));
   server.sendContent_P(bodyBeforeFw);
   server.sendContent(fw);
@@ -1580,6 +1615,7 @@ void handleRootPage() {
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
+  <button id='connectViewButton' type='button'>Connect</button>
   <button id='configViewButton' type='button'>Settings</button>
   <button id='updateViewButton' type='button'>Update</button>
 </div>
@@ -1647,11 +1683,58 @@ void handleRootPage() {
   <div class='actions'>
     <button id='modelPreviewButton' type='button'>Preview 3D</button>
     <button id='modelMlButton' type='button'>Calculate ml</button>
+    <button id='modelShareButton' class='secondaryBtn hidden' type='button'>Share model</button>
     <button id='modelStartButton' class='spanAll' type='button'>Start print</button>
   </div>
   <div id='previewWrap' class='hidden' style='margin-top:12px'>
     <canvas id='modelPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
     <div class='hint'>Preview is built in the browser from every Nth sliced layer; the box is the printer's build volume (40.8 &times; 30.6 &times; 68 mm).</div>
+  </div>
+</section>
+
+<section id='connectView' class='card hidden'>
+  <h2>TinyMaker Connect</h2>
+  <div id='connectReadyBox' class='hidden'>
+    <div class='grid'>
+      <div><div class='label'>Status</div><div id='connectStatusValue' class='value'>Registered</div></div>
+      <div><div class='label'>Printer ID</div><div id='connectPrinterIdValue' class='value'>-</div></div>
+      <div><div class='label'>Server</div><div id='connectServerValue' class='value'>-</div></div>
+      <div><div class='label'>Leaderboard</div><div id='connectLeaderboardValue' class='value'>-</div></div>
+    </div>
+    <div id='connectReadyHint' class='hint'>This printer is ready to publish and manage TinyMaker Connect models.</div>
+    <button id='connectSettingsButton' class='button secondary' type='button'>Connect settings</button>
+  </div>
+  <div id='connectPublishBox' class='hidden' style='margin-top:14px'>
+    <h2>Share model</h2>
+    <div class='configGrid'>
+      <label><span>Model name</span><input id='shareModelName' type='text' maxlength='120'></label>
+      <label><span>Original credits</span><input id='shareCredits' type='text' maxlength='255'></label>
+    </div>
+    <canvas id='connectPreviewCanvas' class='hidden' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517;margin-top:10px'></canvas>
+    <div id='shareSteps' class='hint'></div>
+    <div id='shareProgress' class='storageBar hidden'><span id='shareProgressFill'></span></div>
+    <button id='shareUploadButton' class='hidden' type='button'>Upload model</button>
+  </div>
+  <div id='connectBrowserBox' class='hidden' style='margin-top:14px'>
+    <h2>Models</h2>
+    <div class='hint'>Shared models can be downloaded from TinyMaker Connect. To publish one of your own models, open SD manager, press Details, then Share model.</div>
+    <div id='connectModelsList' class='files' style='margin-top:10px'></div>
+  </div>
+  <div id='connectManagerBox' class='hidden' style='margin-top:14px'>
+    <h2>Manager</h2>
+    <div class='hint'>Models shared by this printer can be hidden, republished, or removed here.</div>
+    <div id='connectMineList' class='files' style='margin-top:10px'></div>
+  </div>
+  <div id='connectSetupBox'>
+    <div class='hint'>TinyMaker Connect is not configured on this printer yet.</div>
+    <div class='grid' style='margin-top:12px'>
+      <div><div class='label'>Step 1</div><div class='value'>Enable Connect</div></div>
+      <div><div class='label'>Step 2</div><div class='value'>Test server</div></div>
+      <div><div class='label'>Step 3</div><div class='value'>Register printer</div></div>
+      <div><div class='label'>Optional</div><div class='value'>Leaderboard sharing</div></div>
+    </div>
+    <div id='connectSetupHint' class='hint'>Setup uses the default TinyMaker Connect server. You can change the server URL before registering.</div>
+    <button id='connectSetupButton' type='button'>Set up TinyMaker Connect</button>
   </div>
 </section>
 
@@ -1687,6 +1770,18 @@ void handleRootPage() {
       </div>
       <div id='mqttHint' class='hint'>MQTT publishing will use these settings in the SmartHome integration step.</div>
     </div>
+    <label class='check spanAll'><input name='connect_enabled' id='cfgConnectEnabled' type='checkbox' value='1'><span>Enable TinyMaker Connect</span></label>
+    <div id='connectFields' class='spanAll hidden'>
+      <div class='configGrid'>
+        <label class='spanAll'><span>Connect server URL</span><input name='connect_base_url' id='cfgConnectBaseUrl' type='text' maxlength='128' placeholder='https://tinymaker.inductie.nu'></label>
+        <label><span>Printer display name</span><input name='connect_printer_name' id='cfgConnectPrinterName' type='text' maxlength='64' placeholder='TinyMaker'></label>
+        <label class='check'><input name='connect_leaderboard' id='cfgConnectLeaderboard' type='checkbox' value='1'><span>Share printer stats on leaderboard</span></label>
+      </div>
+      <div id='connectHint' class='hint'>Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.</div>
+      <button id='connectTestButton' class='button secondary' type='button'>Test Connect server</button>
+      <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
+      <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
+    </div>
     <button id='configSaveButton' class='spanAll' type='submit'>Save config</button>
   </form>
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
@@ -1718,7 +1813,7 @@ void handleRootPage() {
 
 <script>
 const $=id=>document.getElementById(id);
-let statusData=null,selectedModel='',sdFreeBytes=0,sdTotalBytes=0;
+let statusData=null,selectedModel='',sdFreeBytes=0,sdTotalBytes=0,connectConfig=null,shareState=null;
 const setText=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
 const show=(id,on)=>{const e=$(id);if(e)e.classList.toggle('hidden',!on);};
 const enc=v=>encodeURIComponent(v||'').replace(/'/g,'%27');
@@ -1790,12 +1885,15 @@ let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlig
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
+  show('connectView',view==='connect');
   show('configView',view==='config');
   show('updateView',view==='update');
   $('homeViewButton').classList.toggle('active',view==='home'||view==='model');
+  $('connectViewButton').classList.toggle('active',view==='connect');
   $('configViewButton').classList.toggle('active',view==='config');
   $('updateViewButton').classList.toggle('active',view==='update');
   if(view==='home')loadFiles();
+  if(view==='connect')loadConfig().then(()=>loadConnectModels());
   if(view==='config')loadConfig();
   if(view==='update')loadUpdate();
 };
@@ -1855,6 +1953,7 @@ const applyStatus=s=>{
       setConfigDisabled(configIsLocallyLocked()||!wc);
       if(configIsLocallyLocked())$('configHint').textContent='Config is locked while printing.';
     }
+    updateConnectView(connectConfig);
     $('uploadButton').disabled=s.busy||!s.sdReady; $('uploadFile').disabled=s.busy||!s.sdReady;
     if(s.busy){$('uploadHint').textContent='Uploads and SD actions are disabled while the printer is busy.';} else if(!s.sdReady){$('uploadHint').textContent='Insert an SD card before uploading or managing models.';} else {$('uploadHint').textContent='Uploaded SL1/ZIP files are unpacked into printable model folders on the SD card.';}
     if(was!==s.busy){loadFiles();loadConfig();}
@@ -1920,6 +2019,7 @@ const modelDetails=async(nameEnc,estimate)=>{
   if(!estimate){
     setText('modelTitle',name); setText('modelLayers','Loading'); setText('modelHeight','-'); setText('modelTime','-');
     show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
+    show('modelShareButton',connectIsReady());
   } else {
     $('modelMlButton').disabled=true;
     $('modelMlButton').textContent='Calculating...';
@@ -2027,6 +2127,176 @@ const modelPreview=async()=>{
   btn.disabled=false;btn.textContent='Preview 3D';
 };
 
+const connectIsReady=()=>!!(connectConfig&&connectConfig.connectEnabled&&connectConfig.connectPrinterPublicId&&connectConfig.connectPublishToken);
+const connectBase=()=>String((connectConfig&&connectConfig.connectBaseUrl)||'https://tinymaker.inductie.nu').replace(/\/+$/,'');
+const connectApiUrl=path=>connectBase()+path;
+const connectFetchJson=async path=>{
+  const r=await fetch(connectApiUrl(path),{cache:'no-store'});
+  let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));
+  return j;
+};
+const connectPostForm=(path,fd,progressCb)=>new Promise((resolve,reject)=>{
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST',connectApiUrl(path));
+  xhr.upload.onprogress=e=>{if(progressCb&&e.lengthComputable)progressCb(e.loaded,e.total);};
+  xhr.onload=()=>{let j={};try{j=JSON.parse(xhr.responseText||'{}');}catch(e){} if(xhr.status>=200&&xhr.status<300&&j.ok!==false)resolve(j);else reject(new Error(j.error||('HTTP '+xhr.status)));};
+  xhr.onerror=()=>reject(new Error('upload failed'));
+  xhr.send(fd);
+});
+const connectModelHtml=(m,mine)=>{
+  const detail=connectBase()+'/model/'+enc(m.public_id);
+  const preview=m.preview_url?connectBase()+m.preview_url:'';
+  const resin=(m.resin_ml===null||m.resin_ml===undefined)?'-':Number(m.resin_ml).toFixed(2)+' ml';
+  const rating=m.rating_count>0?(Number(m.rating_average||0).toFixed(1)+'/5'):'No ratings';
+  let h='<div class="connectTile">';
+  h+='<a href="'+esc(detail)+'" target="_blank" rel="noopener">';
+  h+='<div class="connectPreview">'+(preview?'<img src="'+esc(preview)+'" alt="">':'<span class="meta">No preview</span>')+'</div>';
+  h+='<h2>'+esc(m.model_name)+'</h2>';
+  h+='<div class="meta">'+esc(m.original_credits||'')+'</div>';
+  h+='<div class="connectStats">';
+  h+='<div class="connectStat"><div class="label">Layers</div><div class="value">'+esc(m.layers||0)+'</div></div>';
+  h+='<div class="connectStat"><div class="label">Height</div><div class="value">'+Number(m.height_mm||0).toFixed(2)+' mm</div></div>';
+  h+='<div class="connectStat"><div class="label">Resin</div><div class="value">'+esc(resin)+'</div></div>';
+  h+='</div><div class="pills">';
+  h+='<span class="pill">'+esc(m.download_count||0)+' downloads</span>';
+  h+='<span class="pill">'+esc(rating)+'</span>';
+  if(m.bookmark_count)h+='<span class="pill">'+esc(m.bookmark_count)+' bookmarks</span>';
+  if(mine&&m.status)h+='<span class="pill">'+esc(m.status)+'</span>';
+  h+='</div></a>';
+  h+='<div class="connectActions">';
+  h+='<button class="small secondaryBtn" onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\')">Import</button>';
+  if(mine){
+    if(m.status==='hidden')h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'published\')">Publish</button>';
+    else h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'hidden\')">Hide</button>';
+    h+='<button class="delete" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'removed\')">Remove</button>';
+  }
+  h+='</div></div>';
+  return h;
+};
+const loadConnectModels=async()=>{
+  if(!connectIsReady())return;
+  $('connectModelsList').innerHTML='<div class="hint">Loading models...</div>';
+  $('connectMineList').innerHTML='<div class="hint">Loading your shared models...</div>';
+  try{
+    const all=await connectFetchJson('/api/models');
+    const items=all.items||[];
+    $('connectModelsList').innerHTML=items.length?'<div class="connectTiles">'+items.slice(0,20).map(m=>connectModelHtml(m,false)).join('')+'</div>':'<div class="hint">No shared models yet.</div>';
+  }catch(e){$('connectModelsList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
+  try{
+    const mine=await connectFetchJson('/api/printers/me/models?publish_token='+enc(connectConfig.connectPublishToken));
+    const items=mine.items||[];
+    $('connectMineList').innerHTML=items.length?'<div class="connectTiles">'+items.map(m=>connectModelHtml(m,true)).join('')+'</div>':'<div class="hint">This printer has not shared models yet.</div>';
+  }catch(e){$('connectMineList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
+};
+const connectModelAction=async(id,action)=>{
+  if(action==='removed'&&!confirm('Remove this shared model from TinyMaker Connect?'))return;
+  const fd=new FormData();fd.append('publish_token',connectConfig.connectPublishToken);
+  if(action==='removed')fd.append('_method','DELETE');else{fd.append('_method','PATCH');fd.append('status',action);}
+  try{await connectPostForm('/api/models/'+enc(id),fd,null);loadConnectModels();}catch(e){msg(e.message,true);}
+};
+window.connectModelAction=connectModelAction;
+const connectImportModel=async(id,name,downloadUrl)=>{
+  id=decodeURIComponent(id);name=decodeURIComponent(name);downloadUrl=decodeURIComponent(downloadUrl);
+  if(statusData&&statusData.busy){msg('Printer is busy. Import when idle.',true);return;}
+  if(statusData&&statusData.sdReady===false){msg('Insert an SD card before importing models.',true);return;}
+  if(!confirm('Import '+name+' to the printer SD card?'))return;
+  const url=connectBase()+downloadUrl+(downloadUrl.indexOf('?')>=0?'&':'?')+'publish_token='+enc(connectConfig.connectPublishToken);
+  try{
+    msg('Downloading '+name+' from TinyMaker Connect...');
+    const r=await fetch(url,{cache:'no-store'});
+    if(!r.ok)throw new Error('download failed (HTTP '+r.status+')');
+    const blob=await r.blob();
+    if(!checkUploadFits(blob.size,$('statusMsg')))return;
+    const fd=new FormData();
+    fd.append('file',blob,name.replace(/[^A-Za-z0-9_.-]/g,'_')+'.zip');
+    uploadBusy=true;
+    msg('Importing '+name+' to SD...');
+    await uploadWithProgress(fd,$('statusMsg'));
+    msg('Imported '+name+' to SD.');
+    uploadBusy=false;
+    refreshStatus();loadFiles();loadConnectModels();
+  }catch(e){uploadBusy=false;msg(e.message,true);}
+};
+window.connectImportModel=connectImportModel;
+
+let crcTable=null;
+const crc32=buf=>{
+  if(!crcTable){crcTable=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);crcTable[n]=c>>>0;}}
+  let c=0xffffffff;const b=new Uint8Array(buf);
+  for(let i=0;i<b.length;i++)c=crcTable[(c^b[i])&255]^(c>>>8);
+  return (c^0xffffffff)>>>0;
+};
+const zipU16=(a,v)=>{a.push(v&255,(v>>>8)&255);};
+const zipU32=(a,v)=>{a.push(v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255);};
+const zipHeader=(sig,fn,crc,size,offset,central)=>{
+  const a=[];zipU32(a,sig);
+  if(central){zipU16(a,20);zipU16(a,20);}else zipU16(a,20);
+  zipU16(a,0);zipU16(a,0);zipU16(a,0);zipU16(a,0);zipU32(a,crc);zipU32(a,size);zipU32(a,size);zipU16(a,fn.length);zipU16(a,0);
+  if(central){zipU16(a,0);zipU16(a,0);zipU16(a,0);zipU32(a,0);zipU32(a,offset);}
+  return new Uint8Array(a);
+};
+const zipModelLayers=async(name,layers,progressCb)=>{
+  const encText=new TextEncoder(),parts=[],central=[];let offset=0,centralSize=0;
+  for(let i=1;i<=layers;i++){
+    const r=await fetch('/api/files/layer?name='+enc(name)+'&i='+i,{cache:'no-store'});
+    if(!r.ok)throw new Error('layer '+i+' failed');
+    const data=await r.arrayBuffer(),fn=encText.encode(i+'.png'),crc=crc32(data),size=data.byteLength;
+    const local=zipHeader(0x04034b50,fn,crc,size,offset,false);
+    parts.push(local,fn,data);offset+=local.length+fn.length+size;
+    const cd=zipHeader(0x02014b50,fn,crc,size,offset-local.length-fn.length-size,true);
+    central.push(cd,fn);centralSize+=cd.length+fn.length;
+    if(progressCb)progressCb(i,layers);
+  }
+  const centralStart=offset;central.forEach(p=>parts.push(p));
+  const end=[];zipU32(end,0x06054b50);zipU16(end,0);zipU16(end,0);zipU16(end,layers);zipU16(end,layers);zipU32(end,centralSize);zipU32(end,centralStart);zipU16(end,0);parts.push(new Uint8Array(end));
+  return new Blob(parts,{type:'application/zip'});
+};
+const canvasBlob=cv=>new Promise(res=>cv.toBlob(b=>res(b),'image/png'));
+const shareSet=(text,pct)=>{
+  $('shareSteps').textContent=text;
+  show('shareProgress',pct!==null&&pct!==undefined);
+  if(pct!==null&&pct!==undefined)$('shareProgressFill').style.width=Math.max(0,Math.min(100,pct))+'%';
+};
+const shareModel=async name=>{
+  if(!connectIsReady()){msg('Configure TinyMaker Connect first.',true);openView('connect');return;}
+  openView('connect');show('connectPublishBox',true);$('shareUploadButton').classList.add('hidden');$('shareUploadButton').disabled=true;
+  $('shareModelName').value=name;$('shareCredits').value='';
+  shareState={sdName:name,details:null,archive:null,preview:null};
+  try{
+    shareSet('1. Calculating ml...',10);
+    const d=await api('/api/files/model?name='+enc(name)+'&estimate=1',null,120000);
+    shareState.details=d;
+    shareSet('2. Making preview image...',25);
+    const modelH=Number(d.heightMm)||d.layers*0.05;
+    if(slicesCache.name!==name||!slicesCache.slices.length)await fetchSlices(name,d.layers,modelH,null);
+    show('connectPreviewCanvas',true);drawIso($('connectPreviewCanvas'),1);
+    shareState.preview=await canvasBlob($('connectPreviewCanvas'));
+    shareSet('3. Preparing model for upload...',35);
+    shareState.archive=await zipModelLayers(name,d.layers,(i,n)=>shareSet('3. Preparing model for upload... '+i+' / '+n,35+Math.round(55*i/n)));
+    shareSet('4. Done. Review the details, then upload.',100);
+    $('shareUploadButton').classList.remove('hidden');$('shareUploadButton').disabled=false;
+  }catch(e){shareSet(e.message,null);msg(e.message,true);}
+};
+const uploadSharedModel=async()=>{
+  if(!shareState||!shareState.archive||!shareState.details)return;
+  const modelName=$('shareModelName').value.trim();
+  if(!modelName){msg('Model name is required.',true);return;}
+  const d=shareState.details,fd=new FormData();
+  fd.append('publish_token',connectConfig.connectPublishToken);
+  fd.append('model_name',modelName);fd.append('original_credits',$('shareCredits').value.trim());
+  fd.append('layers',d.layers);fd.append('height_mm',d.heightMm);if(d.resinEstimated)fd.append('resin_ml',d.resinMl);
+  fd.append('archive',shareState.archive,modelName.replace(/[^A-Za-z0-9_.-]/g,'_')+'.zip');
+  if(shareState.preview)fd.append('preview',shareState.preview,'preview.png');
+  $('shareUploadButton').disabled=true;
+  try{
+    shareSet('6. Uploading...',0);
+    await connectPostForm('/api/models',fd,(l,t)=>shareSet('6. Uploading... '+Math.round(100*l/t)+'%',Math.round(100*l/t)));
+    shareSet('7. Model uploaded.',100);loadConnectModels();
+  }catch(e){shareSet(e.message,null);msg(e.message,true);$('shareUploadButton').disabled=false;}
+};
+window.shareModel=name=>shareModel(decodeURIComponent(name));
+
 const applyPendingPrintUi=()=>{
   if(!pendingPrintCmd)return;
   if(pendingPrintCmd==='pause'){$('pauseButton').textContent='Pause requested...';$('pauseButton').disabled=true;}
@@ -2088,20 +2358,49 @@ const confirmNetworkToggle=e=>{
   updateNetworkFields();
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
+const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
+const updateConnectView=c=>{
+  c=c||connectConfig||{};
+  const id=c.connectPrinterPublicId||'';
+  const registered=!!id;
+  show('connectReadyBox',registered);
+  show('connectBrowserBox',registered);
+  show('connectManagerBox',registered);
+  show('connectSetupBox',!registered);
+  if(registered){
+    setText('connectPrinterIdValue',id);
+    setText('connectServerValue',c.connectBaseUrl||'https://tinymaker.inductie.nu');
+    setText('connectLeaderboardValue',c.connectLeaderboardOptIn?'Enabled':'Off');
+    setText('connectStatusValue',c.connectEnabled?'Registered':'Registered, disabled');
+    $('connectReadyHint').textContent=c.connectEnabled?'This printer is ready to publish and manage TinyMaker Connect models.':'Connect is registered but disabled. Enable it in settings before publishing or syncing.';
+  }else{
+    $('connectSetupHint').textContent=c.connectLastStatus?('Last status: '+c.connectLastStatus):'Setup uses the default TinyMaker Connect server. You can change the server URL before registering.';
+  }
+  const locked=!!(statusData&&statusData.busy)||!!(statusData&&statusData.webControl===false);
+  $('connectSetupButton').disabled=locked;
+  $('connectSettingsButton').disabled=locked;
+  show('modelShareButton',connectIsReady()&&!!selectedModel);
+};
 const loadConfig=async()=>{
   try{
     const c=await api('/api/config');
+    connectConfig=c;
     $('cfgLayerHeight').value=Number(c.layerHeight).toFixed(2); $('cfgBaseExposure').value=c.baseExposure; $('cfgRegularExposure').value=c.regularExposure; $('cfgBaseLayers').value=c.baseLayers; $('cfgTransitionLayers').value=c.transitionLayers;
     $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
-    updateNetworkFields();updateMqttFields();
+    $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
+    const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
+    updateConnectView(c);
+    updateNetworkFields();updateMqttFields();updateConnectFields();
     show('configMqttResetButton',!!c.mqttConfigured);
-    $('configDefaultsButton').textContent=c.mqttConfigured?'Reset to defaults (Excluding MQTT)':'Reset to defaults';
+    show('configConnectResetButton',!!c.connectConfigured);
+    $('configDefaultsButton').textContent=(c.mqttConfigured||c.connectConfigured)?'Reset to defaults (Excluding integrations)':'Reset to defaults';
     const noWc=!c.webDashboardEnabled;
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
-  }catch(e){const locked=configIsLocallyLocked();setConfigDisabled(locked);$('configHint').textContent=locked?'Config is locked while printing.':e.message;}
+    return c;
+  }catch(e){const locked=configIsLocallyLocked();setConfigDisabled(locked);updateConnectView(null);$('configHint').textContent=locked?'Config is locked while printing.':e.message;return null;}
 };
 
 window.modelDetails=modelDetails;
@@ -2112,17 +2411,34 @@ $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();f
 
 $('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
-$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('MQTT')>=0;if(!confirm(keep?'Reset config to defaults and keep MQTT settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. MQTT settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!confirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configConnectResetButton').addEventListener('click',async()=>{if(!confirm('Reset TinyMaker Connect settings and forget this printer token?'))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!confirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('disableDryRunButton').addEventListener('click',async()=>{if(!confirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
 $('vatRefillButton').addEventListener('click',async()=>{if(!confirm('Mark the VAT as refilled? The resin estimate restarts from a full VAT.'))return;try{const r=await api('/api/vat/refilled',{method:'POST'});msg('VAT marked as refilled ('+r.vatRemainingMl+' ml).');refreshStatus();}catch(e){msg(e.message,true);}});
 $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
+$('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('homeViewButton').addEventListener('click',()=>openView('home'));
+$('connectViewButton').addEventListener('click',()=>openView('connect'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
 $('updateViewButton').addEventListener('click',()=>openView('update'));
 $('modelBackButton').addEventListener('click',()=>openView('home'));
+$('connectSetupButton').addEventListener('click',async()=>{
+  openView('config');
+  await loadConfig();
+  if(configIsLocallyLocked()||(statusData&&statusData.webControl===false))return;
+  $('cfgConnectEnabled').checked=true;
+  updateConnectFields();
+  if(!$('cfgConnectBaseUrl').value)$('cfgConnectBaseUrl').value='https://tinymaker.inductie.nu';
+  $('connectFields').scrollIntoView({behavior:'smooth',block:'start'});
+  $('cfgConnectBaseUrl').focus();
+  msg('Check the Connect settings, then test the server and register.');
+});
+$('connectSettingsButton').addEventListener('click',()=>openView('config'));
 
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};
@@ -2196,9 +2512,11 @@ $('resumeButton').addEventListener('click',()=>printCommand('resume','Resume thi
 $('stopButton').addEventListener('click',()=>printCommand('stop','Stop this print?'));
 $('modelMlButton').addEventListener('click',()=>modelDetails(enc(selectedModel),true));
 $('modelPreviewButton').addEventListener('click',modelPreview);
+$('modelShareButton').addEventListener('click',()=>shareModel(selectedModel));
 $('modelStartButton').addEventListener('click',()=>startPrint(enc(selectedModel)));
+$('shareUploadButton').addEventListener('click',uploadSharedModel);
 
-openView(location.hash==='#settings'?'config':'home');refreshStatus();loadConfig();setInterval(tickLocalStatus,1000);setInterval(()=>{refreshStatus();retryPendingPrintCommand();},2000);
+openView(location.hash==='#settings'?'config':(location.hash==='#connect'?'connect':'home'));refreshStatus();loadConfig();setInterval(tickLocalStatus,1000);setInterval(()=>{refreshStatus();retryPendingPrintCommand();},2000);
 </script>
 )SPA";
   sendRootStyledPage(rootBodyBeforeFw, fw, rootBodyAfterFw);
@@ -2473,7 +2791,10 @@ void network_setup() {
   server.on("/api/config", HTTP_POST, handleApiConfigSave);
   server.on("/api/config/defaults", HTTP_POST, handleApiConfigDefaults);
   server.on("/api/config/mqtt/defaults", HTTP_POST, handleApiConfigMqttDefaults);
+  server.on("/api/config/connect/defaults", HTTP_POST, handleApiConfigConnectDefaults);
   server.on("/api/config/dry-run", HTTP_POST, handleApiConfigDryRun);
+  server.on("/api/connect/test", HTTP_POST, handleApiConnectTest);
+  server.on("/api/connect/register", HTTP_POST, handleApiConnectRegister);
   server.on("/api/print/start", HTTP_POST, handleApiPrintStart);
   server.on("/api/vat/refilled", HTTP_POST, handleApiVatRefilled);
   server.on("/api/update", HTTP_GET, handleApiUpdateGet);
