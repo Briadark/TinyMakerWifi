@@ -272,7 +272,7 @@ static bool otaWebAllowed() {
 // Pass the inner card HTML; returns the full document.
 String otaStyledPage(const String &inner) {
   return String(
-    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker firmware update</title>"
     // Inline data-URI favicon (orange rounded square with a white T) -
     // shows in the browser tab and bookmarks, nothing stored on the device
@@ -1571,7 +1571,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", "");
   server.sendContent_P(PSTR(
-    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker</title>"
     "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
     "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
