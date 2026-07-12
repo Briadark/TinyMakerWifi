@@ -1726,7 +1726,9 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".warn{color:#ffb15f}"
     ".hidden{display:none}"
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
-    "#statusMsg{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#2a2a2e;color:#eee;border:1px solid #4a4a50;border-radius:8px;padding:10px 14px;box-shadow:0 6px 20px rgba(0,0,0,.45);font-size:13px;line-height:1.4}"
+    // Top-center: a bottom toast hid behind the action buttons and blended in.
+    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#43434a;color:#fff;border:1px solid #6a6a72;border-radius:8px;padding:10px 16px;box-shadow:0 6px 20px rgba(0,0,0,.55);font-size:14px;line-height:1.4}"
+    "#statusMsg.warn{background:#3a2320;border-color:#b34a38}"
     "#statusMsg:empty{display:none}"
     "#statusMsg.warn{border-color:#7b2f2f;color:#ffb15f}"
     ".configGrid .hint{grid-column:1/-1}"
@@ -1913,9 +1915,11 @@ void handleRootPage() {
   </div>
 </section>
 
-<section id='configView' class='card hidden'>
-  <h2>Settings</h2>
-  <form id='configForm' class='configGrid'>
+<section id='configView' class='hidden'>
+  <form id='configForm'>
+  <div class='card'>
+  <h2>Print settings</h2>
+  <div class='configGrid'>
     <label><span>Layer height (mm)</span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
     <label><span>Base exposure (s)</span><input name='base_exposure' id='cfgBaseExposure' type='number' min='10' max='60' step='1'></label>
     <label><span>Regular exposure (s)</span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
@@ -1932,6 +1936,11 @@ void handleRootPage() {
     <label class='check'><input name='low_resin_pause' id='cfgLowResinPause' type='checkbox' value='1'><span>Low resin pause (mid-print)</span></label>
     <label class='check'><input name='ask_refill' id='cfgAskRefill' type='checkbox' value='1'><span>Ask refill before print</span></label>
     <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
+  </div>
+  </div>
+  <div class='card'>
+  <h2>Network &amp; integrations</h2>
+  <div class='configGrid'>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
     <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
     <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
@@ -1968,11 +1977,12 @@ void handleRootPage() {
       <button id='tgHelpButton' class='button secondary small' type='button'>? How to get the token &amp; chat ID</button>
       <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
     </div>
-    <button id='configSaveButton' class='spanAll' type='submit'>Save config</button>
+  </div>
+  </div>
+  <button id='configSaveButton' type='submit'>Save config</button>
   </form>
-  <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
-  <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
-  <div class='label' style='margin-top:16px'>Backup &amp; restore</div>
+  <div class='card'>
+  <h2>Backup &amp; restore</h2>
   <div class='actions'>
     <button id='backupDownloadButton' class='button secondary' type='button'>Download backup</button>
     <button id='backupSdButton' class='button secondary' type='button'>Backup to SD</button>
@@ -1981,6 +1991,9 @@ void handleRootPage() {
   </div>
   <input id='restoreFile' type='file' accept='.json,application/json' class='hidden'>
   <div id='backupHint' class='hint'>The backup holds every setting and the lifetime counters. With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.</div>
+  <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
+  <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
+  </div>
   <div id='configHint' class='hint'>Config locks automatically while printing.</div>
 </section>
 
