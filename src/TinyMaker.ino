@@ -408,7 +408,14 @@ String buildConfigBackupJson() {
 #ifdef FIRMWARE_VERSION
   out += FIRMWARE_VERSION;
 #endif
-  out += "\",\"layerHeight\":";
+  // Kept near the front so a light 512-byte read (sdBackupSavedEpoch) sees it.
+  // 0 when the clock is not NTP-synced (epoch below ~2023 = not real time).
+  out += "\",\"savedAtEpoch\":";
+  {
+    time_t nowT = time(nullptr);
+    out += String((uint32_t)(nowT > 1700000000 ? nowT : 0));
+  }
+  out += ",\"layerHeight\":";
   out += String(Layer_Height, 2);
   out += ",\"baseExposure\":";
   out += String(Base_Exposure);
@@ -565,6 +572,18 @@ bool sdBackupExists() {
   if (!f) return false;
   f.close();
   return true;
+}
+
+// savedAtEpoch from the SD backup (0 if absent/unknown). savedAtEpoch sits near
+// the front of the file, so a 512-byte read is enough. Assumes SD is ready.
+uint32_t sdBackupSavedEpoch() {
+  File f = SD.open(BACKUP_PATH);
+  if (!f) return 0;
+  String j;
+  j.reserve(512);
+  while (f.available() && j.length() < 512) j += (char)f.read();
+  f.close();
+  return (uint32_t)backupNum(j, "savedAtEpoch", 0);
 }
 
 bool writeBackupToSd() {

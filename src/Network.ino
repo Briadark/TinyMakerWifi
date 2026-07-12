@@ -943,8 +943,11 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
+  bool sdBk = !printerBusy() && sdCardReady() && sdBackupExists();
   out += ",\"sdBackupPresent\":";
-  out += (!printerBusy() && sdCardReady() && sdBackupExists()) ? "true" : "false";
+  out += sdBk ? "true" : "false";
+  out += ",\"sdBackupEpoch\":";
+  out += String(sdBk ? sdBackupSavedEpoch() : 0);
   out += tinymakerConnectConfigJson();
   out += tinymakerTelegramConfigJson();
   return out;
@@ -2575,6 +2578,7 @@ const loadConfig=async()=>{
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
     $('restoreSdButton').disabled=locked||!c.sdBackupPresent; $('restoreSdButton').title=c.sdBackupPresent?'':'No backup found on the SD card';
+    $('backupHint').textContent=(c.sdBackupPresent?('Backup on SD: '+(c.sdBackupEpoch?new Date(c.sdBackupEpoch*1000).toLocaleString():'date unknown')+'. '):'No backup on the SD card yet. ')+'With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.';
     return c;
   }catch(e){const locked=configIsLocallyLocked();setConfigDisabled(locked);updateConnectView(null);$('configHint').textContent=locked?'Config is locked while printing.':e.message;return null;}
 };
@@ -2593,7 +2597,7 @@ $('configConnectResetButton').addEventListener('click',async()=>{if(!confirm('Re
 $('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!confirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('backupDownloadButton').addEventListener('click',async()=>{try{const r=await fetch('/api/config/backup',{cache:'no-store'});if(!r.ok)throw new Error('backup failed (HTTP '+r.status+')');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tinymaker-backup.json';a.click();URL.revokeObjectURL(a.href);msg('Backup downloaded.');}catch(e){msg(e.message,true);}});
-$('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');}catch(e){msg(e.message,true);}});
+$('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');loadConfig();}catch(e){msg(e.message,true);}});
 $('restoreButton').addEventListener('click',()=>$('restoreFile').click());
 $('restoreSdButton').addEventListener('click',async()=>{if(!confirm('Restore all settings from the SD card backup? Current settings will be overwritten.'))return;try{await api('/api/config/restore/sd',{method:'POST'});msg('Settings restored from SD backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
 $('restoreFile').addEventListener('change',async()=>{const f=$('restoreFile').files[0];$('restoreFile').value='';if(!f)return;if(!confirm('Restore all settings from '+f.name+'? Current settings will be overwritten.'))return;try{const t=await f.text();await api('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:t});msg('Settings restored from backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
