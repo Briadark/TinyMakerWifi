@@ -1928,6 +1928,7 @@ void handleRootPage() {
     <div id='tgFields' class='spanAll hidden'>
       <div class='configGrid'>
         <label class='spanAll'><span>Bot token</span><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'></label>
+        <label class='check spanAll'><input id='cfgTgTokenShow' type='checkbox'><span>Show token</span></label>
         <label class='spanAll'><span>Chat ID</span><input name='tg_chat' id='cfgTgChat' type='text' maxlength='32' placeholder='123456789'></label>
       </div>
       <div id='tgHint' class='hint'>Messages you when a print finishes, pauses for low resin, or is canceled. Create a bot with @BotFather for the token; get your chat ID from @userinfobot.</div>
@@ -2567,7 +2568,7 @@ const loadConfig=async()=>{
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
-    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgChat').value=c.tgChat||'';
+    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgTokenShow').checked=false; $('cfgTgChat').value=c.tgChat||'';
     $('tgHint').textContent=(c.tgTokenSet?'Bot token is saved. Enter a new one only to replace it. ':'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
     updateNetworkFields();updateMqttFields();updateConnectFields();updateTgFields();
@@ -2608,6 +2609,7 @@ $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
+$('cfgTgTokenShow').addEventListener('change',()=>{$('cfgTgToken').type=$('cfgTgTokenShow').checked?'text':'password';});
 $('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
