@@ -1706,7 +1706,9 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".modal.hidden{display:none}"
     ".modalCard{background:#1c1c1e;border:1px solid #3a3a3f;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
     ".modalText{color:#eee;font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
-    ".modalBtns{display:flex;gap:10px}.modalBtns button{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
+    // .button.secondary (0,2,0) outranks .modalBtns button (0,1,1) - without the
+    // extra selector Cancel keeps its 10px margin-top and renders shorter than OK.
+    ".modalBtns{display:flex;gap:10px}.modalBtns button,.modalBtns .button.secondary{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
     ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
     ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
