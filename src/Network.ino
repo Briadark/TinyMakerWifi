@@ -1720,6 +1720,8 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     // extra selector Cancel keeps its 10px margin-top and renders shorter than OK.
     ".modalBtns{display:flex;gap:10px}.modalBtns button,.modalBtns .button.secondary{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
     ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
+    ".pwWrap{position:relative;display:block}.pwWrap input{width:100%;padding-right:40px}"
+    ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:#aaa}.eyeBtn:hover{color:#eee}"
     ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
     ".hidden{display:none}"
@@ -1959,8 +1961,7 @@ void handleRootPage() {
     <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Telegram notifications</span></label>
     <div id='tgFields' class='spanAll hidden'>
       <div class='configGrid'>
-        <label class='spanAll'><span>Bot token</span><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'></label>
-        <label class='check spanAll'><input id='cfgTgTokenShow' type='checkbox'><span>Show token</span></label>
+        <label class='spanAll'><span>Bot token</span><span class='pwWrap'><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'><button id='cfgTgTokenShow' class='eyeBtn' type='button' title='Show/hide what you typed'>&#128065;</button></span></label>
         <label class='spanAll'><span>Chat ID</span><input name='tg_chat' id='cfgTgChat' type='text' maxlength='32' placeholder='123456789'></label>
       </div>
       <div id='tgHint' class='hint'>Messages you when a print finishes, pauses for low resin, or is canceled.</div>
@@ -2022,7 +2023,8 @@ const api=async(path,opt,timeoutMs)=>{
   }catch(e){if(e.name==='AbortError')throw new Error('timeout');throw e;}
   finally{if(timer)clearTimeout(timer);}
 };
-const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);};
+// Bottom snackbar. Info messages auto-hide; warnings stay until replaced.
+const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);clearTimeout(msg._t);if(t&&!warn)msg._t=setTimeout(()=>{if(e.textContent===t)e.textContent='';},5000);};
 // Styled replacement for window.confirm() - returns a Promise<bool>. Matches
 // the dashboard instead of the browser's native (unstyleable) dialog.
 let uiConfirmRes=null;
@@ -2613,7 +2615,7 @@ const loadConfig=async()=>{
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
-    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgTokenShow').checked=false; $('cfgTgChat').value=c.tgChat||'';
+    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
     $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token ends in '+(c.tgTokenTail||'****')+' - cannot be viewed, type a new one to replace'):'Paste the token from @BotFather';
     $('tgHint').textContent=(c.tgTokenSet?('Bot token saved'+(c.tgTokenTail?(' (ends in '+c.tgTokenTail+')'):'')+'. Leave blank to keep it, or enter a new one to replace. '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
@@ -2659,7 +2661,7 @@ $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
-$('cfgTgTokenShow').addEventListener('change',()=>{$('cfgTgToken').type=$('cfgTgTokenShow').checked?'text':'password';});
+$('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
 $('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
 $('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
 $('tgHelpModal').addEventListener('click',e=>{if(e.target===$('tgHelpModal'))show('tgHelpModal',false);});
