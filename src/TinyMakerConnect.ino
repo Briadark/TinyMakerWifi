@@ -23,7 +23,10 @@ String connectNormalizeBaseUrl(String url) {
 }
 
 bool connectConfigured() {
-  return connectBaseUrl.length() > 0 ||
+  // The base URL defaults to a non-empty value, so "has a URL" alone would
+  // make this true on every factory-fresh device.
+  return connectEnabled ||
+         connectBaseUrl != "https://tinymaker.inductie.nu" ||
          connectPrinterPublicId.length() > 0 ||
          connectPublishToken.length() > 0;
 }

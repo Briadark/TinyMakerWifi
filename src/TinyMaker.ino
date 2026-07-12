@@ -224,6 +224,9 @@ bool otaHasUpdate();
 void otaInstallLatest();
 void network_service_window(uint16_t durationMs);
 void screen422();   // "install from file" screen (Interface.ino, #if-guarded)
+void tgNotifyFinished();   // Telegram hooks (TinyMakerTelegram.ino, #if-guarded)
+void tgNotifyLowResin();
+void tgNotifyCanceled();
 void screenBootUpdatePrompt();
 void screenBootUpdateDisablePrompt();
 #endif
@@ -471,6 +474,18 @@ String buildConfigBackupJson() {
   out += backupEscape(tgToken);
   out += "\",\"tgChat\":\"";
   out += backupEscape(tgChat);
+  out += "\",\"connectEnabled\":";
+  out += connectEnabled ? "true" : "false";
+  out += ",\"connectBaseUrl\":\"";
+  out += backupEscape(connectBaseUrl);
+  out += "\",\"connectPrinterName\":\"";
+  out += backupEscape(connectPrinterName);
+  out += "\",\"connectLeaderboard\":";
+  out += connectLeaderboardOptIn ? "true" : "false";
+  out += ",\"connectPublicId\":\"";
+  out += backupEscape(connectPrinterPublicId);
+  out += "\",\"connectToken\":\"";
+  out += backupEscape(connectPublishToken);
   out += "\",\"printSecs\":";
   out += String(totalPrintSecs);
   out += ",\"uvLedSecs\":";
@@ -554,6 +569,13 @@ void applyConfigBackup(const String &j) {
   tgEnabled = wifiEnabled && backupBool(j, "tgEnabled", tgEnabled);
   tgToken = backupStr(j, "tgToken", tgToken);
   tgChat = backupStr(j, "tgChat", tgChat);
+  connectEnabled = wifiEnabled && backupBool(j, "connectEnabled", connectEnabled);
+  connectBaseUrl = backupStr(j, "connectBaseUrl", connectBaseUrl);
+  connectPrinterName = backupStr(j, "connectPrinterName", connectPrinterName);
+  if (connectPrinterName.length() == 0) connectPrinterName = "TinyMaker";
+  connectLeaderboardOptIn = connectEnabled && backupBool(j, "connectLeaderboard", connectLeaderboardOptIn);
+  connectPrinterPublicId = backupStr(j, "connectPublicId", connectPrinterPublicId);
+  connectPublishToken = backupStr(j, "connectToken", connectPublishToken);
   totalPrintSecs = (uint32_t)backupNum(j, "printSecs", totalPrintSecs);
   totalUvLedSecs = (uint32_t)backupNum(j, "uvLedSecs", totalUvLedSecs);
   vatRemainingMl = (float)backupNum(j, "vatRemainingMl", vatRemainingMl);
@@ -1497,15 +1519,19 @@ void loop() {
             delay(10); 
 
             current_state = lowResinPauseNow ? 10 : 6;  // 10 = "Refill VAT" pause
-            #if ENABLE_NETWORK
-            if (lowResinPauseNow) tgNotifyLowResin();   // platform is lifted; TLS send is safe
-            #endif
+            bool lowResinNotifyPending = lowResinPauseNow;
             lowResinPauseNow = false;
             saveVatRemaining();   // checkpoint at the pause point
             screen1111_state();
             gfx2->fillRect(136, 12, 16, 16, RED);
             gfx2->fillTriangle(136, 52, 136, 68, 152, 60, GREEN);
             screen1111DOWN();
+            #if ENABLE_NETWORK
+            // Notify only after the checkpoint is saved and the pause UI is
+            // drawn: on weak WiFi the blocking send can hold the loop for
+            // seconds, and nothing print-critical may wait on it.
+            if (lowResinNotifyPending) tgNotifyLowResin();
+            #endif
               
             while(print_paused == true){
               #if ENABLE_NETWORK
@@ -1609,8 +1635,10 @@ void loop() {
         savePrintTime();   // single exit point: finish, cancel and homing-abort
         saveVatRemaining();
         #if ENABLE_NETWORK
-        if (print_canceled) tgNotifyCanceled();
-        else                tgNotifyFinished();   // print is done; TLS send is safe
+        // A homing abort/error arrives here with print_canceled still false -
+        // it must never read as a finished print on the user's phone.
+        if (print_canceled || homing_canceled) tgNotifyCanceled();
+        else                                   tgNotifyFinished();
         #endif
         screen1();
       }

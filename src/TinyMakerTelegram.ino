@@ -116,6 +116,12 @@ String tinymakerTelegramConfigJson() {
 // POST /api/telegram/test -> send a test message with the saved settings.
 void handleApiTelegramTest() {
   if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    // Same rule as the Connect test: a blocking TLS request (up to 8 s) must
+    // never run inside the print loop's narrow network windows.
+    sendApiError(409, "printer busy");
+    return;
+  }
 
   String error;
   if (!telegramSendMessage("TinyMaker: test notification", error)) {
