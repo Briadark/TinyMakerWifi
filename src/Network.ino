@@ -944,6 +944,7 @@ String configJson() {
   out += jsonEscape(mqttTopic);
   out += "\"";
   out += tinymakerConnectConfigJson();
+  out += tinymakerTelegramConfigJson();
   return out;
 }
 
@@ -984,6 +985,14 @@ void applyConfigRequest() {
   connectPrinterName = formString("connect_printer_name", connectPrinterName, 64);
   if (connectPrinterName.length() == 0) connectPrinterName = "TinyMaker";
   connectLeaderboardOptIn = connectEnabled && server.hasArg("connect_leaderboard");
+  tgEnabled = server.hasArg("tg_enabled");
+  if (!wifiEnabled) tgEnabled = false;
+  // Token is a secret: only overwrite when a new one is supplied, so a blank
+  // field keeps the stored value (same rule as the MQTT password).
+  if (server.hasArg("tg_token") && server.arg("tg_token").length() > 0) {
+    tgToken = formString("tg_token", tgToken, 64);
+  }
+  tgChat = formString("tg_chat", tgChat, 32);
 
   savePrintSettings();
   saveDeviceConfig();
@@ -1875,6 +1884,15 @@ void handleRootPage() {
       <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
       <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
     </div>
+    <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Telegram notifications</span></label>
+    <div id='tgFields' class='spanAll hidden'>
+      <div class='configGrid'>
+        <label class='spanAll'><span>Bot token</span><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'></label>
+        <label class='spanAll'><span>Chat ID</span><input name='tg_chat' id='cfgTgChat' type='text' maxlength='32' placeholder='123456789'></label>
+      </div>
+      <div id='tgHint' class='hint'>Messages you when a print finishes, pauses for low resin, or is canceled. Create a bot with @BotFather for the token; get your chat ID from @userinfobot.</div>
+      <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
+    </div>
     <button id='configSaveButton' class='spanAll' type='submit'>Save config</button>
   </form>
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
@@ -2475,6 +2493,7 @@ const confirmNetworkToggle=e=>{
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
 const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
+const updateTgFields=()=>show('tgFields',$('cfgTgEnabled').checked);
 const updateConnectView=c=>{
   c=c||connectConfig||{};
   const id=c.connectPrinterPublicId||'';
@@ -2507,8 +2526,10 @@ const loadConfig=async()=>{
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
+    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgChat').value=c.tgChat||'';
+    $('tgHint').textContent=(c.tgTokenSet?'Bot token is saved. Enter a new one only to replace it. ':'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
-    updateNetworkFields();updateMqttFields();updateConnectFields();
+    updateNetworkFields();updateMqttFields();updateConnectFields();updateTgFields();
     show('configMqttResetButton',!!c.mqttConfigured);
     show('configConnectResetButton',!!c.connectConfigured);
     $('configDefaultsButton').textContent=(c.mqttConfigured||c.connectConfigured)?'Reset to defaults (Excluding integrations)':'Reset to defaults';
@@ -2542,6 +2563,8 @@ $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
+$('cfgTgEnabled').addEventListener('change',updateTgFields);
+$('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
@@ -2928,6 +2951,7 @@ void network_setup() {
   server.on("/api/config/dry-run", HTTP_POST, handleApiConfigDryRun);
   server.on("/api/connect/test", HTTP_POST, handleApiConnectTest);
   server.on("/api/connect/register", HTTP_POST, handleApiConnectRegister);
+  server.on("/api/telegram/test", HTTP_POST, handleApiTelegramTest);
   server.on("/api/print/start", HTTP_POST, handleApiPrintStart);
   server.on("/api/vat/refilled", HTTP_POST, handleApiVatRefilled);
   server.on("/api/update", HTTP_GET, handleApiUpdateGet);

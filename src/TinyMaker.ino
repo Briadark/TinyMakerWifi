@@ -120,6 +120,9 @@ bool connectLeaderboardOptIn = false;
 String connectPrinterPublicId = "";
 String connectPublishToken = "";
 String connectLastStatus = "";
+bool tgEnabled = false;             // Telegram outbound notifications (V1)
+String tgToken = "";                // bot token (secret - never echoed to browser)
+String tgChat = "";                 // chat id to notify
 unsigned long lastUiActivityMs = 0;
 bool uiBlanked = false;
 
@@ -161,6 +164,9 @@ void loadDeviceConfig() {
   connectLeaderboardOptIn = sysPrefs.getBool("tmcLeaderboard", false);
   connectPrinterPublicId = sysPrefs.getString("tmcPublicId", "");
   connectPublishToken = sysPrefs.getString("tmcToken", "");
+  tgEnabled = sysPrefs.getBool("tgEnabled", false);
+  tgToken = sysPrefs.getString("tgToken", "");
+  tgChat = sysPrefs.getString("tgChat", "");
   vatRemainingMl = sysPrefs.getFloat("vatRemMl", -1);
   lowResinPauseEnabled = sysPrefs.getBool("lowResinOn", false);
   lowResinThresholdMl = sysPrefs.getUChar("lowResinMl", 2);
@@ -189,6 +195,9 @@ void saveDeviceConfig() {
   sysPrefs.putBool("tmcLeaderboard", connectLeaderboardOptIn);
   sysPrefs.putString("tmcPublicId", connectPrinterPublicId);
   sysPrefs.putString("tmcToken", connectPublishToken);
+  sysPrefs.putBool("tgEnabled", tgEnabled);
+  sysPrefs.putString("tgToken", tgToken);
+  sysPrefs.putString("tgChat", tgChat);
   sysPrefs.putBool("lowResinOn", lowResinPauseEnabled);
   sysPrefs.putUChar("lowResinMl", lowResinThresholdMl);
   sysPrefs.putBool("askRefill", askRefillEnabled);
@@ -449,6 +458,12 @@ String buildConfigBackupJson() {
   out += backupEscape(mqttPass);
   out += "\",\"mqttTopic\":\"";
   out += backupEscape(mqttTopic);
+  out += "\",\"tgEnabled\":";
+  out += tgEnabled ? "true" : "false";
+  out += ",\"tgToken\":\"";
+  out += backupEscape(tgToken);
+  out += "\",\"tgChat\":\"";
+  out += backupEscape(tgChat);
   out += "\",\"printSecs\":";
   out += String(totalPrintSecs);
   out += ",\"uvLedSecs\":";
@@ -529,6 +544,9 @@ void applyConfigBackup(const String &j) {
   mqttPass = backupStr(j, "mqttPass", mqttPass);
   mqttTopic = backupStr(j, "mqttTopic", mqttTopic);
   if (mqttTopic.length() == 0) mqttTopic = "TinyMaker";
+  tgEnabled = wifiEnabled && backupBool(j, "tgEnabled", tgEnabled);
+  tgToken = backupStr(j, "tgToken", tgToken);
+  tgChat = backupStr(j, "tgChat", tgChat);
   totalPrintSecs = (uint32_t)backupNum(j, "printSecs", totalPrintSecs);
   totalUvLedSecs = (uint32_t)backupNum(j, "uvLedSecs", totalUvLedSecs);
   vatRemainingMl = (float)backupNum(j, "vatRemainingMl", vatRemainingMl);
@@ -1460,6 +1478,9 @@ void loop() {
             delay(10); 
 
             current_state = lowResinPauseNow ? 10 : 6;  // 10 = "Refill VAT" pause
+            #if ENABLE_NETWORK
+            if (lowResinPauseNow) tgNotifyLowResin();   // platform is lifted; TLS send is safe
+            #endif
             lowResinPauseNow = false;
             saveVatRemaining();   // checkpoint at the pause point
             screen1111_state();
@@ -1568,6 +1589,10 @@ void loop() {
         digitalWrite(FAN, LOW);
         savePrintTime();   // single exit point: finish, cancel and homing-abort
         saveVatRemaining();
+        #if ENABLE_NETWORK
+        if (print_canceled) tgNotifyCanceled();
+        else                tgNotifyFinished();   // print is done; TLS send is safe
+        #endif
         screen1();
       }
         break;
