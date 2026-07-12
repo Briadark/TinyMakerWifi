@@ -1706,7 +1706,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".modal.hidden{display:none}"
     ".modalCard{background:#1c1c1e;border:1px solid #3a3a3f;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
     ".modalText{color:#eee;font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
-    ".modalBtns{display:flex;gap:10px}.modalBtns button{margin-top:0;flex:1;width:auto}"
+    ".modalBtns{display:flex;gap:10px}.modalBtns button{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
     ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
     ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
@@ -1762,6 +1762,8 @@ void handleRootPage() {
 <div id='updOverlay' class='updOverlay'><div class='updSpin'></div><h2>Updating firmware</h2><div class='hint'>Do not power off the printer.<br>This page reloads automatically when it is back.</div></div>
 
 <div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
+
+<div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:#eee;font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1944,12 +1946,7 @@ void handleRootPage() {
         <label class='spanAll'><span>Chat ID</span><input name='tg_chat' id='cfgTgChat' type='text' maxlength='32' placeholder='123456789'></label>
       </div>
       <div id='tgHint' class='hint'>Messages you when a print finishes, pauses for low resin, or is canceled.</div>
-      <ol class='hint' style='margin:8px 0 0;padding-left:20px;line-height:1.6'>
-        <li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b> above.</li>
-        <li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li>
-        <li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li>
-        <li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li>
-      </ol>
+      <button id='tgHelpButton' class='button secondary small' type='button'>? How to get the token &amp; chat ID</button>
       <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
     </div>
     <button id='configSaveButton' class='spanAll' type='submit'>Save config</button>
@@ -2597,7 +2594,7 @@ const loadConfig=async()=>{
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
     $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgTokenShow').checked=false; $('cfgTgChat').value=c.tgChat||'';
-    $('tgHint').textContent=(c.tgTokenSet?'Bot token is saved. Enter a new one only to replace it. ':'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
+    $('tgHint').textContent=(c.tgTokenSet?('Bot token saved'+(c.tgTokenTail?(' (ends in '+c.tgTokenTail+')'):'')+'. Leave blank to keep it, or enter a new one to replace. '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
     updateNetworkFields();updateMqttFields();updateConnectFields();updateTgFields();
     show('configMqttResetButton',!!c.mqttConfigured);
@@ -2638,6 +2635,9 @@ $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
 $('cfgTgTokenShow').addEventListener('change',()=>{$('cfgTgToken').type=$('cfgTgTokenShow').checked?'text':'password';});
+$('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
+$('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
+$('tgHelpModal').addEventListener('click',e=>{if(e.target===$('tgHelpModal'))show('tgHelpModal',false);});
 $('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
@@ -2655,7 +2655,7 @@ $('connectSetupButton').addEventListener('click',async()=>{
   $('cfgConnectBaseUrl').focus();
   msg('Check the Connect settings, then test the server and register.');
 });
-$('connectSettingsButton').addEventListener('click',()=>openView('config'));
+$('connectSettingsButton').addEventListener('click',async()=>{openView('config');await loadConfig();const t=$('cfgConnectEnabled');if(t)t.scrollIntoView({behavior:'smooth',block:'center'});});
 
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};

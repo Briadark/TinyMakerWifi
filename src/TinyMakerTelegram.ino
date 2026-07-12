@@ -103,7 +103,11 @@ String tinymakerTelegramConfigJson() {
   out += tgEnabled ? "true" : "false";
   out += ",\"tgTokenSet\":";
   out += tgToken.length() > 0 ? "true" : "false";
-  out += ",\"tgChat\":\"";
+  // Last 4 chars only, for "did I paste the right token?" verification without
+  // echoing the secret (empty for short tokens).
+  out += ",\"tgTokenTail\":\"";
+  out += jsonEscape(tgToken.length() > 4 ? tgToken.substring(tgToken.length() - 4) : "");
+  out += "\",\"tgChat\":\"";
   out += jsonEscape(tgChat);
   out += "\"";
   return out;
