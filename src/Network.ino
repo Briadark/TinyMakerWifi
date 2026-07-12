@@ -1728,8 +1728,10 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".hidden{display:none}"
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
     // Top-center: a bottom toast hid behind the action buttons and blended in.
-    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#43434a;color:#fff;border:1px solid #6a6a72;border-radius:8px;padding:10px 16px;box-shadow:0 6px 20px rgba(0,0,0,.55);font-size:14px;line-height:1.4}"
-    "#statusMsg.warn{background:#3a2320;border-color:#b34a38;color:#ffb15f}"
+    // Brand-orange border + slide-in: a static grey box was easy to miss.
+    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#2e2e33;color:#fff;border:2px solid #e8720c;border-radius:10px;padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:14px;font-weight:600;line-height:1.4;animation:toastIn .25s ease}"
+    "@keyframes toastIn{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}"
+    "#statusMsg.warn{background:#3a2320;border-color:#d4705c;color:#ffb15f}"
     "#statusMsg:empty{display:none}"
     ".configGrid .hint{grid-column:1/-1}"
     "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}}"
@@ -2043,7 +2045,9 @@ const api=async(path,opt,timeoutMs)=>{
   finally{if(timer)clearTimeout(timer);}
 };
 // Top-center snackbar. Info messages auto-hide; warnings stay until replaced.
-const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);clearTimeout(msg._t);if(t&&!warn)msg._t=setTimeout(()=>{if(e.textContent===t)e.textContent='';},5000);};
+const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);
+  if(t){e.style.animation='none';void e.offsetWidth;e.style.animation='';} // restart the slide-in on every message
+  clearTimeout(msg._t);if(t&&!warn)msg._t=setTimeout(()=>{if(e.textContent===t)e.textContent='';},5000);};
 // Styled replacement for window.confirm() - returns a Promise<bool>. Matches
 // the dashboard instead of the browser's native (unstyleable) dialog.
 let uiConfirmRes=null;
