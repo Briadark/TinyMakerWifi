@@ -1729,9 +1729,8 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
     // Top-center: a bottom toast hid behind the action buttons and blended in.
     "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#43434a;color:#fff;border:1px solid #6a6a72;border-radius:8px;padding:10px 16px;box-shadow:0 6px 20px rgba(0,0,0,.55);font-size:14px;line-height:1.4}"
-    "#statusMsg.warn{background:#3a2320;border-color:#b34a38}"
+    "#statusMsg.warn{background:#3a2320;border-color:#b34a38;color:#ffb15f}"
     "#statusMsg:empty{display:none}"
-    "#statusMsg.warn{border-color:#7b2f2f;color:#ffb15f}"
     ".configGrid .hint{grid-column:1/-1}"
     "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}}"
     // Desktop: widen the frame and lay the dashboard cards out in two
@@ -2043,7 +2042,7 @@ const api=async(path,opt,timeoutMs)=>{
   }catch(e){if(e.name==='AbortError')throw new Error('timeout');throw e;}
   finally{if(timer)clearTimeout(timer);}
 };
-// Bottom snackbar. Info messages auto-hide; warnings stay until replaced.
+// Top-center snackbar. Info messages auto-hide; warnings stay until replaced.
 const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);clearTimeout(msg._t);if(t&&!warn)msg._t=setTimeout(()=>{if(e.textContent===t)e.textContent='';},5000);};
 // Styled replacement for window.confirm() - returns a Promise<bool>. Matches
 // the dashboard instead of the browser's native (unstyleable) dialog.
@@ -2053,7 +2052,7 @@ const uiConfirmClose=v=>{if(!uiConfirmRes)return;show('confirmModal',false);cons
 $('confirmOk').addEventListener('click',()=>uiConfirmClose(true));
 $('confirmCancel').addEventListener('click',()=>uiConfirmClose(false));
 $('confirmModal').addEventListener('click',e=>{if(e.target===$('confirmModal'))uiConfirmClose(false);});
-document.addEventListener('keydown',e=>{if(uiConfirmRes){if(e.key==='Escape')uiConfirmClose(false);else if(e.key==='Enter')uiConfirmClose(true);}});
+document.addEventListener('keydown',e=>{if(uiConfirmRes){if(e.key==='Escape'){e.preventDefault();uiConfirmClose(false);}else if(e.key==='Enter'){e.preventDefault();uiConfirmClose(document.activeElement!==$('confirmCancel'));}}});
 const bytesNum=v=>Number(v||0)||0;
 const formatBytes=v=>{
   let n=bytesNum(v),u=['B','KB','MB','GB'],i=0;
@@ -2409,9 +2408,13 @@ const connectModelHtml=(m,mine)=>{
   h+='<div class="connectActions">';
   h+='<button class="small secondaryBtn" onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\')">Import</button>';
   if(mine){
-    if(m.status==='hidden')h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'published\')">Publish</button>';
-    else h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'hidden\')">Hide</button>';
-    h+='<button class="delete" onclick="connectModelAction(\''+esc(m.public_id)+'\',\'removed\')">Remove</button>';
+    // enc(), not esc(): the HTML parser decodes entities inside onclick before
+    // the JS runs, so an HTML-escaped quote in server data would still break
+    // out of the string (script injection). URI-encoding survives both parses;
+    // the handler decodeURIComponent()s it back - same scheme as Import above.
+    if(m.status==='hidden')h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+enc(m.public_id)+'\',\'published\')">Publish</button>';
+    else h+='<button class="small secondaryBtn" onclick="connectModelAction(\''+enc(m.public_id)+'\',\'hidden\')">Hide</button>';
+    h+='<button class="delete" onclick="connectModelAction(\''+enc(m.public_id)+'\',\'removed\')">Remove</button>';
   }
   h+='</div></div>';
   return h;
@@ -2432,6 +2435,7 @@ const loadConnectModels=async()=>{
   }catch(e){$('connectMineList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
 };
 const connectModelAction=async(id,action)=>{
+  id=decodeURIComponent(id);
   if(action==='removed'&&!await uiConfirm('Remove this shared model from TinyMaker Connect?',{danger:true}))return;
   const fd=new FormData();fd.append('publish_token',connectConfig.connectPublishToken);
   if(action==='removed')fd.append('_method','DELETE');else{fd.append('_method','PATCH');fd.append('status',action);}
@@ -2589,7 +2593,10 @@ const tickLocalStatus=()=>{
   }
 };
 
-const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton,#backupDownloadButton,#backupSdButton,#restoreButton,#restoreSdButton').forEach(e=>e.disabled=disabled);};
+let sdBackupPresent=false; // from /api/config; part of the restoreSdButton gate below
+// restoreSdButton's disabled state is owned HERE (lock + backup-present) - the
+// 2s status poll re-runs this, so a per-button override elsewhere gets wiped.
+const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton,#backupDownloadButton,#backupSdButton,#restoreButton,#restoreSdButton').forEach(e=>e.disabled=disabled);$('restoreSdButton').disabled=disabled||!sdBackupPresent;};
 const configIsLocallyLocked=()=>!!(statusData&&statusData.busy);
 const updateNetworkFields=()=>{$('cfgWebDashboardEnabled').disabled=!$('cfgWifiEnabled').checked;};
 const confirmNetworkToggle=async e=>{
@@ -2597,7 +2604,10 @@ const confirmNetworkToggle=async e=>{
   const text=e.target.id==='cfgWifiEnabled'
     ? 'Turn WiFi off?\nThe printer will reboot and you will lose web access until WiFi is re-enabled on the printer (System > Advanced).'
     : 'Turn web control off?\nThe dashboard becomes view-only: print controls, SD delete, settings and firmware updates are disabled (monitoring and slicer upload keep working). Re-enable on the printer (System > Advanced).';
-  if(!await uiConfirm(text,{danger:true}))e.target.checked=true;
+  const ok=await uiConfirm(text,{danger:true});
+  // Set the box explicitly per the answer: while the modal was open a status
+  // poll may have run loadConfig and rewritten the checkbox under the user.
+  e.target.checked=!ok;
   updateNetworkFields();
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
@@ -2650,7 +2660,7 @@ const loadConfig=async()=>{
     const noWc=!c.webDashboardEnabled;
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
-    $('restoreSdButton').disabled=locked||!c.sdBackupPresent; $('restoreSdButton').title=c.sdBackupPresent?'':'No backup found on the SD card';
+    sdBackupPresent=!!c.sdBackupPresent; $('restoreSdButton').disabled=locked||!sdBackupPresent; $('restoreSdButton').title=sdBackupPresent?'':'No backup found on the SD card';
     const fmt24=e=>{const d=new Date(e*1000),p=n=>('0'+n).slice(-2);return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
     $('backupHint').textContent=(c.sdBackupPresent?('Backup on SD: '+(c.sdBackupEpoch?fmt24(c.sdBackupEpoch):'date unknown')+'. '):'No backup on the SD card yet. ')+'With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.';
     return c;
