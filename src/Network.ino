@@ -943,6 +943,8 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
+  out += ",\"sdBackupPresent\":";
+  out += (!printerBusy() && sdCardReady() && sdBackupExists()) ? "true" : "false";
   out += tinymakerConnectConfigJson();
   out += tinymakerTelegramConfigJson();
   return out;
@@ -2570,6 +2572,7 @@ const loadConfig=async()=>{
     const noWc=!c.webDashboardEnabled;
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
+    $('restoreSdButton').disabled=locked||!c.sdBackupPresent; $('restoreSdButton').title=c.sdBackupPresent?'':'No backup found on the SD card';
     return c;
   }catch(e){const locked=configIsLocallyLocked();setConfigDisabled(locked);updateConnectView(null);$('configHint').textContent=locked?'Config is locked while printing.':e.message;return null;}
 };
