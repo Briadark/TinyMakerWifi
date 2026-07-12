@@ -1698,6 +1698,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     // automatic reload once the printer answers status polls again.
     ".updOverlay{position:fixed;inset:0;z-index:99;background:rgba(20,20,22,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
     ".updOverlay.on{display:flex}.updOverlay h2{color:#e8720c}"
+    ".modal{position:fixed;inset:0;z-index:80;background:rgba(20,20,22,.6);display:flex;align-items:center;justify-content:center;padding:20px}"
+    ".modal.hidden{display:none}"
+    ".modalCard{background:#1c1c1e;border:1px solid #3a3a3f;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
+    ".modalText{color:#eee;font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
+    ".modalBtns{display:flex;gap:10px}.modalBtns button{margin-top:0;flex:1;width:auto}"
     ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
     ".hidden{display:none}"
@@ -1750,6 +1755,8 @@ void handleRootPage() {
 </section>
 
 <div id='updOverlay' class='updOverlay'><div class='updSpin'></div><h2>Updating firmware</h2><div class='hint'>Do not power off the printer.<br>This page reloads automatically when it is back.</div></div>
+
+<div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1996,6 +2003,15 @@ const api=async(path,opt,timeoutMs)=>{
   finally{if(timer)clearTimeout(timer);}
 };
 const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.toggle('warn',!!warn);};
+// Styled replacement for window.confirm() - returns a Promise<bool>. Matches
+// the dashboard instead of the browser's native (unstyleable) dialog.
+let uiConfirmRes=null;
+const uiConfirm=(message,opts)=>{opts=opts||{};$('confirmText').textContent=message;$('confirmOk').textContent=opts.ok||'OK';$('confirmCancel').textContent=opts.cancel||'Cancel';$('confirmOk').classList.toggle('delete',!!opts.danger);show('confirmModal',true);$('confirmOk').focus();return new Promise(r=>{uiConfirmRes=r;});};
+const uiConfirmClose=v=>{if(!uiConfirmRes)return;show('confirmModal',false);const r=uiConfirmRes;uiConfirmRes=null;r(v);};
+$('confirmOk').addEventListener('click',()=>uiConfirmClose(true));
+$('confirmCancel').addEventListener('click',()=>uiConfirmClose(false));
+$('confirmModal').addEventListener('click',e=>{if(e.target===$('confirmModal'))uiConfirmClose(false);});
+document.addEventListener('keydown',e=>{if(uiConfirmRes){if(e.key==='Escape')uiConfirmClose(false);else if(e.key==='Enter')uiConfirmClose(true);}});
 const bytesNum=v=>Number(v||0)||0;
 const formatBytes=v=>{
   let n=bytesNum(v),u=['B','KB','MB','GB'],i=0;
@@ -2371,7 +2387,7 @@ const loadConnectModels=async()=>{
   }catch(e){$('connectMineList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
 };
 const connectModelAction=async(id,action)=>{
-  if(action==='removed'&&!confirm('Remove this shared model from TinyMaker Connect?'))return;
+  if(action==='removed'&&!await uiConfirm('Remove this shared model from TinyMaker Connect?',{danger:true}))return;
   const fd=new FormData();fd.append('publish_token',connectConfig.connectPublishToken);
   if(action==='removed')fd.append('_method','DELETE');else{fd.append('_method','PATCH');fd.append('status',action);}
   try{await connectPostForm('/api/models/'+enc(id),fd,null);loadConnectModels();}catch(e){msg(e.message,true);}
@@ -2381,7 +2397,7 @@ const connectImportModel=async(id,name,downloadUrl)=>{
   id=decodeURIComponent(id);name=decodeURIComponent(name);downloadUrl=decodeURIComponent(downloadUrl);
   if(statusData&&statusData.busy){msg('Printer is busy. Import when idle.',true);return;}
   if(statusData&&statusData.sdReady===false){msg('Insert an SD card before importing models.',true);return;}
-  if(!confirm('Import '+name+' to the printer SD card?'))return;
+  if(!await uiConfirm('Import '+name+' to the printer SD card?'))return;
   const url=connectBase()+downloadUrl+(downloadUrl.indexOf('?')>=0?'&':'?')+'publish_token='+enc(connectConfig.connectPublishToken);
   try{
     msg('Downloading '+name+' from TinyMaker Connect...');
@@ -2498,9 +2514,9 @@ const retryPendingPrintCommand=async()=>{
     else msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for the next safe network window...',true);
   }finally{pendingPrintInFlight=false;applyPendingPrintUi();}
 };
-const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||enc(selectedModel));if(!name)return;if(!force&&!confirm('Start this print?'))return;
+const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||enc(selectedModel));if(!name)return;if(!force&&!await uiConfirm('Start this print?'))return;
   if(!force&&statusData&&statusData.askRefill){
-    if(confirm('Did you refill the VAT since the last print?\nOK = yes (restart the estimate from a full VAT), Cancel = no.')){
+    if(await uiConfirm('Did you refill the VAT since the last print?\nOK = yes (restart the estimate from a full VAT), Cancel = no.')){
       try{await api('/api/vat/refilled',{method:'POST'});}catch(e){}
     }
   }
@@ -2517,10 +2533,10 @@ const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||e
   }
   try{
   const r=await api('/api/print/start?name='+enc(name)+(force?'&force=1':''),{method:'POST'},8000);
-  if(r&&r.warning==='low_resin'){if(confirm('Low resin: ~'+r.vatRemainingMl+' ml left in the VAT (estimate).\nStart anyway?'))startPrint(nameEnc,true);return;}
+  if(r&&r.warning==='low_resin'){if(await uiConfirm('Low resin: ~'+r.vatRemainingMl+' ml left in the VAT (estimate).\nStart anyway?'))startPrint(nameEnc,true);return;}
   msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();lpsSynced=false;applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
-const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!confirm('Delete this SD item?'))return;try{await api('/api/files/delete?name='+enc(name),{method:'POST'});msg('Deleted '+name+'.');loadFiles();}catch(e){msg(e.message,true);}};
-const printCommand=async(cmd,confirmText)=>{if(confirmText&&!confirm(confirmText))return;pendingPrintCmd=cmd;applyPendingPrintUi();msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for printer connection...',true);retryPendingPrintCommand();};
+const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!await uiConfirm('Delete this SD item?',{danger:true}))return;try{await api('/api/files/delete?name='+enc(name),{method:'POST'});msg('Deleted '+name+'.');loadFiles();}catch(e){msg(e.message,true);}};
+const printCommand=async(cmd,confirmText)=>{if(confirmText&&!await uiConfirm(confirmText,{danger:cmd==='stop'}))return;pendingPrintCmd=cmd;applyPendingPrintUi();msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for printer connection...',true);retryPendingPrintCommand();};
 const fmtDur=ms=>{const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>0?h+'h '+m+'m':m+'m '+(s%60)+'s';};
 const tickLocalStatus=()=>{
   if(statusData&&statusData.busy&&localPrintStartedAt){
@@ -2531,12 +2547,12 @@ const tickLocalStatus=()=>{
 const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton,#backupDownloadButton,#backupSdButton,#restoreButton,#restoreSdButton').forEach(e=>e.disabled=disabled);};
 const configIsLocallyLocked=()=>!!(statusData&&statusData.busy);
 const updateNetworkFields=()=>{$('cfgWebDashboardEnabled').disabled=!$('cfgWifiEnabled').checked;};
-const confirmNetworkToggle=e=>{
+const confirmNetworkToggle=async e=>{
   if(e.target.checked){updateNetworkFields();return;}
   const text=e.target.id==='cfgWifiEnabled'
     ? 'Turn WiFi off?\nThe printer will reboot and you will lose web access until WiFi is re-enabled on the printer (System > Advanced).'
     : 'Turn web control off?\nThe dashboard becomes view-only: print controls, SD delete, settings and firmware updates are disabled (monitoring and slicer upload keep working). Re-enable on the printer (System > Advanced).';
-  if(!confirm(text))e.target.checked=true;
+  if(!await uiConfirm(text,{danger:true}))e.target.checked=true;
   updateNetworkFields();
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
@@ -2598,18 +2614,18 @@ $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();f
 
 $('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadButton').classList.add('secondary');$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
-$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!confirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
-$('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
-$('configConnectResetButton').addEventListener('click',async()=>{if(!confirm('Reset TinyMaker Connect settings and forget this printer token?'))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!await uiConfirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?',{danger:true}))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configMqttResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset MQTT settings?',{danger:true}))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
+$('configConnectResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset TinyMaker Connect settings and forget this printer token?',{danger:true}))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
-$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!confirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('backupDownloadButton').addEventListener('click',async()=>{try{const r=await fetch('/api/config/backup',{cache:'no-store'});if(!r.ok)throw new Error('backup failed (HTTP '+r.status+')');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tinymaker-backup.json';a.click();URL.revokeObjectURL(a.href);msg('Backup downloaded.');}catch(e){msg(e.message,true);}});
 $('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');loadConfig();}catch(e){msg(e.message,true);}});
 $('restoreButton').addEventListener('click',()=>$('restoreFile').click());
-$('restoreSdButton').addEventListener('click',async()=>{if(!confirm('Restore all settings from the SD card backup? Current settings will be overwritten.'))return;try{await api('/api/config/restore/sd',{method:'POST'});msg('Settings restored from SD backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
-$('restoreFile').addEventListener('change',async()=>{const f=$('restoreFile').files[0];$('restoreFile').value='';if(!f)return;if(!confirm('Restore all settings from '+f.name+'? Current settings will be overwritten.'))return;try{const t=await f.text();await api('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:t});msg('Settings restored from backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
-$('disableDryRunButton').addEventListener('click',async()=>{if(!confirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
-$('vatRefillButton').addEventListener('click',async()=>{if(!confirm('Mark the VAT as refilled? The resin estimate restarts from a full VAT.'))return;try{const r=await api('/api/vat/refilled',{method:'POST'});msg('VAT marked as refilled ('+r.vatRemainingMl+' ml).');refreshStatus();}catch(e){msg(e.message,true);}});
+$('restoreSdButton').addEventListener('click',async()=>{if(!await uiConfirm('Restore all settings from the SD card backup? Current settings will be overwritten.',{danger:true}))return;try{await api('/api/config/restore/sd',{method:'POST'});msg('Settings restored from SD backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
+$('restoreFile').addEventListener('change',async()=>{const f=$('restoreFile').files[0];$('restoreFile').value='';if(!f)return;if(!await uiConfirm('Restore all settings from '+f.name+'? Current settings will be overwritten.',{danger:true}))return;try{const t=await f.text();await api('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:t});msg('Settings restored from backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
+$('disableDryRunButton').addEventListener('click',async()=>{if(!await uiConfirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
+$('vatRefillButton').addEventListener('click',async()=>{if(!await uiConfirm('Mark the VAT as refilled? The resin estimate restarts from a full VAT.'))return;try{const r=await api('/api/vat/refilled',{method:'POST'});msg('VAT marked as refilled ('+r.vatRemainingMl+' ml).');refreshStatus();}catch(e){msg(e.message,true);}});
 $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
@@ -2684,7 +2700,7 @@ const installFirmware=async v=>{
   if(v&&updInstalledVer&&cmpVer(v,updInstalledVer)===0){msg('Version '+v+' is already installed.',true);return;}
   let warn='Install '+(v||'the latest firmware')+'? The printer reboots when done.';
   if(v&&updInstalledVer&&cmpVer(v,updInstalledVer)<0)warn='Downgrade to '+v+'? The older firmware may ignore or reset newer settings.\nThe printer reboots when done.';
-  if(!confirm(warn))return;
+  if(!await uiConfirm(warn))return;
   try{await api('/api/update/install'+(v?'?version='+v:''),{method:'POST'},20000);msg('Updating... the printer reboots when done.');showUpdLock();}catch(e){msg(e.message,true);}
 };
 $('updInstallLatest').addEventListener('click',()=>installFirmware(''));
@@ -2692,7 +2708,7 @@ $('updInstallSelected').addEventListener('click',()=>installFirmware($('updVersi
 $('updVersionSelect').addEventListener('change',refreshInstallSelected);
 $('updUploadForm').addEventListener('submit',async e=>{
   e.preventDefault();
-  if(!confirm('Flash the selected firmware.bin? The printer reboots when done.'))return;
+  if(!await uiConfirm('Flash the selected firmware.bin? The printer reboots when done.'))return;
   $('updUploadButton').disabled=true;
   try{
     const r=await fetch('/update',{method:'POST',body:new FormData(e.target)});
