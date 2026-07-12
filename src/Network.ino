@@ -1720,6 +1720,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     // extra selector Cancel keeps its 10px margin-top and renders shorter than OK.
     ".modalBtns{display:flex;gap:10px}.modalBtns button,.modalBtns .button.secondary{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
     ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
+    ".subhead{grid-column:1/-1;margin-top:6px;padding-top:14px;border-top:1px solid #3a3a3f;font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#98938a}"
     ".pwWrap{position:relative;display:block}.pwWrap input{width:100%;padding-right:40px}"
     ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:#aaa}.eyeBtn:hover{color:#eee}"
     ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
@@ -1937,6 +1938,7 @@ void handleRootPage() {
     <label class='check'><input name='ask_refill' id='cfgAskRefill' type='checkbox' value='1'><span>Ask refill before print</span></label>
     <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
   </div>
+  <button type='submit'>Save config</button>
   </div>
   <div class='card'>
   <h2>Network &amp; integrations</h2>
@@ -1944,7 +1946,8 @@ void handleRootPage() {
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
     <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
     <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
-    <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT? (SmartHome integration)</span></label>
+    <div class='subhead'>Smart home - MQTT</div>
+    <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT</span></label>
     <div id='mqttFields' class='spanAll hidden'>
       <div class='configGrid'>
         <label><span>MQTT broker host</span><input name='mqtt_host' id='cfgMqttHost' type='text' maxlength='80' placeholder='192.168.1.10'></label>
@@ -1955,6 +1958,7 @@ void handleRootPage() {
       </div>
       <div id='mqttHint' class='hint'>MQTT publishing will use these settings in the SmartHome integration step.</div>
     </div>
+    <div class='subhead'>TinyMaker Connect</div>
     <label class='check spanAll'><input name='connect_enabled' id='cfgConnectEnabled' type='checkbox' value='1'><span>Enable TinyMaker Connect</span></label>
     <div id='connectFields' class='spanAll hidden'>
       <div class='configGrid'>
@@ -1967,7 +1971,8 @@ void handleRootPage() {
       <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
       <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
     </div>
-    <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Telegram notifications</span></label>
+    <div class='subhead'>Telegram notifications</div>
+    <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Enable Telegram notifications</span></label>
     <div id='tgFields' class='spanAll hidden'>
       <div class='configGrid'>
         <label class='spanAll'><span>Bot token</span><span class='pwWrap'><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'><button id='cfgTgTokenShow' class='eyeBtn' type='button' title='Show/hide what you typed'>&#128065;</button></span></label>
@@ -1978,8 +1983,8 @@ void handleRootPage() {
       <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
     </div>
   </div>
-  </div>
   <button id='configSaveButton' type='submit'>Save config</button>
+  </div>
   </form>
   <div class='card'>
   <h2>Backup &amp; restore</h2>
@@ -2629,8 +2634,8 @@ const loadConfig=async()=>{
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
     $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
-    $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token ends in '+(c.tgTokenTail||'****')+' - cannot be viewed, type a new one to replace'):'Paste the token from @BotFather';
-    $('tgHint').textContent=(c.tgTokenSet?('Bot token saved'+(c.tgTokenTail?(' (ends in '+c.tgTokenTail+')'):'')+'. Leave blank to keep it, or enter a new one to replace. '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
+    $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token: ********'+(c.tgTokenTail||'')+' (hidden) - type a new one to replace it'):'Paste the token from @BotFather';
+    $('tgHint').textContent=(c.tgTokenSet?('Bot token saved (last 4 chars: '+(c.tgTokenTail||'?')+' - check they match your token). '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
     updateNetworkFields();updateMqttFields();updateConnectFields();updateTgFields();
     show('configMqttResetButton',!!c.mqttConfigured);
@@ -2644,7 +2649,8 @@ const loadConfig=async()=>{
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
     setConfigDisabled(locked); $('configHint').textContent=noWc?'Settings are disabled while Web control is off (enable it on the printer: System > Advanced).':(locked?'Config is locked while printing.':'Config locks automatically while printing.');
     $('restoreSdButton').disabled=locked||!c.sdBackupPresent; $('restoreSdButton').title=c.sdBackupPresent?'':'No backup found on the SD card';
-    $('backupHint').textContent=(c.sdBackupPresent?('Backup on SD: '+(c.sdBackupEpoch?new Date(c.sdBackupEpoch*1000).toLocaleString():'date unknown')+'. '):'No backup on the SD card yet. ')+'With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.';
+    const fmt24=e=>{const d=new Date(e*1000),p=n=>('0'+n).slice(-2);return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());};
+    $('backupHint').textContent=(c.sdBackupPresent?('Backup on SD: '+(c.sdBackupEpoch?fmt24(c.sdBackupEpoch):'date unknown')+'. '):'No backup on the SD card yet. ')+'With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.';
     return c;
   }catch(e){const locked=configIsLocallyLocked();setConfigDisabled(locked);updateConnectView(null);$('configHint').textContent=locked?'Config is locked while printing.':e.message;return null;}
 };
