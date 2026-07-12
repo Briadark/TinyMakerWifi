@@ -87,4 +87,5 @@ void turn_on_LED(){
     }   
   }
   digitalWrite(LED, LOW);
+  if (uvLedEnabled) uvLedSessionMs += Duration;  // LED aging: count lit time only
 }

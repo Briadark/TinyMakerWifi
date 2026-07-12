@@ -88,6 +88,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="build + checks only; no push, no publish")
     ap.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
+    ap.add_argument("--beta", action="store_true",
+                    help="beta release: publish the Release, the versioned bin and the "
+                         "picker manifest, but do NOT touch version.txt/firmware.bin - "
+                         "self-update stays on the previous version until promotion")
     args = ap.parse_args()
 
     version = read_version()
@@ -142,10 +146,20 @@ def main():
     run(["git", "reset", "--hard", "origin/gh-pages"], cwd=GHPAGES_WORKTREE)
 
     data = fw.read_bytes()
-    (GHPAGES_WORKTREE / "firmware.bin").write_bytes(data)
     (GHPAGES_WORKTREE / f"firmware-{version}.bin").write_bytes(data)
-    (GHPAGES_WORKTREE / "version.txt").write_text(
-        f"{version}\n{PAGES_URL}/firmware.bin\n", newline="\n")
+    if args.beta:
+        # Beta window: printers self-update only from version.txt + firmware.bin,
+        # so leaving both untouched keeps the fleet on the previous release while
+        # the picker (versions.txt) already offers the new one to testers.
+        # version-beta.txt is the beta channel pointer (firmware's Stable/Beta
+        # update-channel switch reads it) - points at the versioned bin.
+        (GHPAGES_WORKTREE / "version-beta.txt").write_text(
+            f"{version}\n{PAGES_URL}/firmware-{version}.bin\n", newline="\n")
+        print(f"   beta: version.txt/firmware.bin untouched; version-beta.txt -> {version}")
+    else:
+        (GHPAGES_WORKTREE / "firmware.bin").write_bytes(data)
+        (GHPAGES_WORKTREE / "version.txt").write_text(
+            f"{version}\n{PAGES_URL}/firmware.bin\n", newline="\n")
 
     # versions.txt: newest first, one X.Y.Z per line (the dashboard's picker)
     manifest_path = GHPAGES_WORKTREE / "versions.txt"

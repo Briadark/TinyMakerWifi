@@ -272,7 +272,7 @@ static bool otaWebAllowed() {
 // Pass the inner card HTML; returns the full document.
 String otaStyledPage(const String &inner) {
   return String(
-    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker firmware update</title>"
     // Inline data-URI favicon (orange rounded square with a white T) -
     // shows in the browser tab and bookmarks, nothing stored on the device
@@ -455,6 +455,9 @@ uint32_t currentRunSecs() {
   if (!printerBusy() || printStartMs == 0) return 0;
   return (millis() - printStartMs) / 1000UL;
 }
+
+// Lifetime LED-on seconds, live: persisted total + the running print's session.
+uint32_t currentUvLedSecs() { return totalUvLedSecs + uvLedSessionMs / 1000UL; }
 
 uint32_t remainingPrintSecs() {
   if (!printerBusy() || layer_counter <= 0) return 0;
@@ -923,6 +926,8 @@ String configJson() {
   out += wifiEnabled ? "true" : "false";
   out += ",\"webDashboardEnabled\":";
   out += webDashboardEnabled ? "true" : "false";
+  out += ",\"bootUpdateCheck\":";
+  out += bootUpdateCheckEnabled ? "true" : "false";
   out += ",\"mqttEnabled\":";
   out += mqttEnabled ? "true" : "false";
   out += ",\"mqttConfigured\":";
@@ -962,6 +967,7 @@ void applyConfigRequest() {
   uvLedEnabled = !server.hasArg("dry_run");
   wifiEnabled = server.hasArg("wifi_enabled");
   webDashboardEnabled = wifiEnabled && server.hasArg("web_dashboard_enabled");
+  bootUpdateCheckEnabled = server.hasArg("boot_update_check");
   mqttEnabled = server.hasArg("mqtt_enabled");
   if (!wifiEnabled) mqttEnabled = false;
   mqttHost = formString("mqtt_host", mqttHost, 80);
@@ -1008,12 +1014,63 @@ void handleApiConfigSave() {
   }
 }
 
+// GET /api/config/backup -> the full settings backup as a downloadable file.
+// Web-control-gated: the backup contains the MQTT password.
+void handleApiConfigBackupGet() {
+  if (rejectIfWebControlOff()) return;
+  server.sendHeader("Content-Disposition", "attachment; filename=tinymaker-backup.json");
+  server.send(200, "application/json", buildConfigBackupJson());
+}
+
+// POST /api/config/backup/sd -> write the backup file onto the SD card, so a
+// future full USB reflash can offer to restore it at first boot.
+void handleApiConfigBackupSd() {
+  if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+  if (!sdCardReady()) {
+    sendApiError(409, "SD card not ready");
+    return;
+  }
+  if (!writeBackupToSd()) {
+    sendApiError(500, "could not write the backup to SD");
+    return;
+  }
+  sendApiOk("\"message\":\"Backup saved to SD (tinymaker-backup.json).\"");
+}
+
+// POST /api/config/restore (raw JSON body) -> apply an uploaded backup.
+void handleApiConfigRestore() {
+  if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+  String body = server.arg("plain");
+  if (body.length() < 10 || backupNum(body, "backupVersion", 0) < 1) {
+    sendApiError(400, "not a TinyMaker backup file");
+    return;
+  }
+  bool wifiWasEnabled = wifiEnabled;
+  applyConfigBackup(body);
+  mqttClient.disconnect();
+  mqttDiscoverySent = false;
+  sendApiOk(configJson());
+  if (wifiWasEnabled && !wifiEnabled) {
+    delay(700); // same as the config-save path: reboot to shut the radio down
+    ESP.restart();
+  }
+}
+
 void resetWebConfigToDefaults() {
   resetSettingsToDefault();
   uiTimeoutSecs = 0;
   uvLedEnabled = true;
   wifiEnabled = true;
   webDashboardEnabled = true;
+  bootUpdateCheckEnabled = true;
   saveDeviceConfig();
 }
 
@@ -1248,6 +1305,10 @@ void mqttPublishDiscovery() {
                            "\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"state_class\":\"measurement\"");
   mqttPublishDiscoveryItem("sensor", "remaining_time_sec", "Remaining time", base + "/print/remaining_time_sec",
                            "\"device_class\":\"duration\",\"unit_of_measurement\":\"s\",\"state_class\":\"measurement\"");
+  // Lowest free heap since boot - HA graphs it during soak tests (a slow
+  // decline = leak). Diagnostic category keeps it out of the main card.
+  mqttPublishDiscoveryItem("sensor", "min_free_heap", "Min free heap", base + "/system/min_free_heap",
+                           "\"unit_of_measurement\":\"B\",\"state_class\":\"measurement\",\"entity_category\":\"diagnostic\"");
   mqttDiscoverySent = true;
 }
 
@@ -1274,6 +1335,7 @@ void mqttPublishStatus() {
                  vatRemaining() <= (float)lowResinThresholdMl ? "ON" : "OFF", true);
   mqttPublishRaw(base + "/print/running_time_sec", String(currentRunSecs()), true);
   mqttPublishRaw(base + "/print/remaining_time_sec", String(remainingPrintSecs()), true);
+  mqttPublishRaw(base + "/system/min_free_heap", String(ESP.getMinFreeHeap()), true);
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -1424,7 +1486,13 @@ void handleApiStatus() {
   double statusResinMl = busy ? resinUsedMl : 0.0;
 
   String out = "{";
-  out += "\"busy\":";
+  out += "\"firmwareVersion\":\"";
+#ifdef FIRMWARE_VERSION
+  out += jsonEscape(FIRMWARE_VERSION);
+#else
+  out += "unknown";
+#endif
+  out += "\",\"busy\":";
   out += busy ? "true" : "false";
   out += ",\"paused\":";
   out += print_paused ? "true" : "false";
@@ -1460,6 +1528,10 @@ void handleApiStatus() {
   out += String(totalPrintSecs);
   out += ",\"lifetimePrintTime\":\"";
   out += formatDuration(totalPrintSecs);
+  out += "\",\"uvLedSecs\":";
+  out += String(currentUvLedSecs());
+  out += ",\"uvLedTime\":\"";
+  out += formatDuration(currentUvLedSecs());
   out += "\",\"model\":\"";
   out += busy ? jsonEscape(String(foldersel_long)) : String("");
   out += "\",\"currentLayer\":";
@@ -1501,6 +1573,17 @@ void handleApiStatus() {
   out += ",\"vatText\":\"";
   out += String(vatRemaining(), 1) + " ml\",\"vatLow\":";
   out += (vatRemaining() <= (float)lowResinThresholdMl) ? "true" : "false";
+  // Heap/uptime instrumentation - the 1.0.0 stability yardstick.
+  // minFreeHeap = lowest free heap since boot (leak detector);
+  // maxAllocHeap = largest allocatable block (fragmentation indicator).
+  out += ",\"freeHeap\":";
+  out += String(ESP.getFreeHeap());
+  out += ",\"minFreeHeap\":";
+  out += String(ESP.getMinFreeHeap());
+  out += ",\"maxAllocHeap\":";
+  out += String(ESP.getMaxAllocHeap());
+  out += ",\"uptimeSecs\":";
+  out += String(millis() / 1000UL);
   out += "}";
 
   server.send(200, "application/json", out);
@@ -1517,7 +1600,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", "");
   server.sendContent_P(PSTR(
-    "<!DOCTYPE html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker</title>"
     "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
     "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
@@ -1566,6 +1649,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:#7b2f2f}.secondaryBtn{background:#3c3c42}"
     "button:disabled{background:#555;color:#aaa;cursor:not-allowed}"
     ".button.secondary{background:#3c3c42;margin-top:10px}"
+    // Full-page lock while a firmware update is in flight; cleared by the
+    // automatic reload once the printer answers status polls again.
+    ".updOverlay{position:fixed;inset:0;z-index:99;background:rgba(20,20,22,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
+    ".updOverlay.on{display:flex}.updOverlay h2{color:#e8720c}"
+    ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
     ".warn{color:#ffb15f}"
     ".hidden{display:none}"
     ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
@@ -1600,7 +1688,7 @@ void handleRootPage() {
 #endif
   static const char rootBodyBeforeFw[] PROGMEM = R"SPA(
 <div class='head'><div><h1>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
-  static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span></div></div></div>
+  static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span> · <a href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a></div></div></div>
 
 <section id='dryRunBanner' class='card banner hidden'>
   <strong>Dry run mode enabled.</strong>
@@ -1612,6 +1700,8 @@ void handleRootPage() {
   <strong>Web control is off - view only.</strong>
   <div>All actions are disabled: print controls, SD changes, uploads, settings and firmware updates. Monitoring and "Send to printer" from the slicer keep working. Enable: printer &rarr; System &rarr; Advanced.</div>
 </section>
+
+<div id='updOverlay' class='updOverlay'><div class='updSpin'></div><h2>Updating firmware</h2><div class='hint'>Do not power off the printer.<br>This page reloads automatically when it is back.</div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1627,6 +1717,7 @@ void handleRootPage() {
       <div><div class='label'>WiFi</div><div class='value'><span id='wifiValue'>-</span><span id='wifiBars' class='wbars'><i></i><i></i><i></i></span></div></div>
       <div><div class='label'>IP</div><div id='ipValue' class='value'>-</div></div>
       <div><div class='label'>Lifetime print time</div><div id='lifetimeValue' class='value'>-</div></div>
+      <div><div class='label'>UV LED time</div><div id='uvLedValue' class='value'>-</div></div>
       <div><div class='label'>SD card</div><div id='sdValue' class='value'>-</div></div>
       <div><div class='label'>Resin left (est.)</div><div id='vatValue' class='value'>-</div></div>
       <div id='printLayerBox' class='hidden'><div class='label'>Layer</div><div id='layerValue' class='value'>-</div></div>
@@ -1635,6 +1726,7 @@ void handleRootPage() {
       <div id='printRemainingBox' class='hidden'><div class='label'>Remaining time</div><div id='remainingValue' class='value'>-</div></div>
     </div>
     <div id='statusMsg' class='hint'></div>
+    <div id='debugValue' class='meta'></div>
     <button id='vatRefillButton' class='button secondary' type='button'>VAT refilled</button>
   </section>
 
@@ -1662,7 +1754,7 @@ void handleRootPage() {
     </div>
     <form id='uploadForm'>
       <input id='uploadFile' type='file' name='file' accept='.sl1,.zip' required>
-      <button id='uploadButton' type='submit'>Upload model</button>
+      <button id='uploadButton' class='button secondary' type='submit'>Upload model</button>
     </form>
     <div id='uploadHint' class='hint'>Uploaded SL1/ZIP files are unpacked into printable model folders on the SD card.</div>
     <input id='filesFilter' type='text' class='hidden' placeholder='Filter models...'>
@@ -1759,6 +1851,7 @@ void handleRootPage() {
     <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
     <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
+    <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
     <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT? (SmartHome integration)</span></label>
     <div id='mqttFields' class='spanAll hidden'>
       <div class='configGrid'>
@@ -1786,6 +1879,14 @@ void handleRootPage() {
   </form>
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
   <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
+  <div class='label' style='margin-top:16px'>Backup &amp; restore</div>
+  <div class='actions'>
+    <button id='backupDownloadButton' class='button secondary' type='button'>Download backup</button>
+    <button id='backupSdButton' class='button secondary' type='button'>Backup to SD</button>
+    <button id='restoreButton' class='button secondary' type='button'>Restore from file</button>
+  </div>
+  <input id='restoreFile' type='file' accept='.json,application/json' class='hidden'>
+  <div id='backupHint' class='hint'>The backup holds every setting and the lifetime counters. With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.</div>
   <div id='configHint' class='hint'>Config locks automatically while printing.</div>
 </section>
 
@@ -1806,7 +1907,7 @@ void handleRootPage() {
   <form id='updUploadForm' style='margin-top:14px'>
     <div class='label'>Or upload a firmware.bin from <a href='https://github.com/slibbinas/TinyMakerWifi/releases' target='_blank' rel='noopener'>GitHub Releases</a>:</div>
     <input id='updFile' type='file' name='firmware' accept='.bin' disabled required>
-    <button id='updUploadButton' type='submit' disabled>Upload &amp; flash</button>
+    <button id='updUploadButton' class='button secondary' type='submit' disabled>Upload &amp; flash</button>
   </form>
   <div class='hint'>Updates are blocked while printing. Do not power off during an update - the printer reboots by itself when done.</div>
 </section>
@@ -1881,7 +1982,15 @@ const uploadWithProgress=(fd,hintEl)=>{
     xhr.send(fd);
   });
 };
-let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,uploadBusy=false;
+let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false,updLock=false,updSawDown=false,updLockAt=0;
+const showUpdLock=()=>{updLock=true;updSawDown=false;updLockAt=Date.now();$('updOverlay').classList.add('on');};
+const pageFirmwareVersion=()=>$('fwVersion').textContent.trim();
+const reloadIfFirmwareChanged=s=>{
+  const live=String(s.firmwareVersion||'').trim(),page=pageFirmwareVersion();
+  if(!live||!page||live===page)return false;
+  location.replace('/?fw='+encodeURIComponent(live)+'&r='+Date.now());
+  return true;
+};
 const openView=view=>{
   show('homeView',view==='home');
   show('modelPanel',view==='model');
@@ -1900,12 +2009,14 @@ const openView=view=>{
 
 const applyStatus=s=>{
     const was=statusData&&statusData.busy; statusData=s;
-    if(s.busy&&typeof s.runSecs==='number')localPrintStartedAt=Date.now()-s.runSecs*1000;
-    if(!s.busy)localPrintStartedAt=0;
+    if(s.busy&&typeof s.runSecs==='number'){const c=Date.now()-s.runSecs*1000;if(!lpsSynced||c<localPrintStartedAt){localPrintStartedAt=c;lpsSynced=true;}}
+    if(!s.busy){localPrintStartedAt=0;lpsSynced=false;}
     if((pendingPrintCmd==='stop'&&s.stopping)||(pendingPrintCmd==='pause'&&(s.pausing||s.paused))||(pendingPrintCmd==='resume'&&s.resuming))pendingPrintCmd='';
-    setText('stateValue',s.state); setText('wifiValue',s.wifiText); setText('ipValue',s.ip); setText('lifetimeValue',s.lifetimePrintTime); setText('sdValue',s.sdText);
+    setText('stateValue',s.state); setText('wifiValue',s.wifiText); setText('ipValue',s.ip); setText('lifetimeValue',s.lifetimePrintTime); setText('uvLedValue',s.uvLedTime||'-'); setText('sdValue',s.sdText);
+    if(typeof s.freeHeap==='number'){const u=s.uptimeSecs||0,ud=Math.floor(u/86400),uh=Math.floor(u%86400/3600),um=Math.floor(u%3600/60);setText('debugValue','heap '+Math.round(s.freeHeap/1024)+'k | min '+Math.round(s.minFreeHeap/1024)+'k | blk '+Math.round(s.maxAllocHeap/1024)+'k | up '+(ud?ud+'d ':'')+uh+'h '+um+'m');}
     const wb=$('wifiBars').children,wr=s.wifiRssi,wn=(wr&&wr<0)?(wr>-60?3:(wr>-75?2:1)):0;for(let i=0;i<3;i++)wb[i].classList.toggle('on',i<wn);
-    setText('layerValue',s.layerText); setText('resinValue',s.resinText); setText('runValue',s.runTime); setText('remainingValue',s.remainingTime);
+    const eta=(s.busy&&s.remainingSecs>0)?new Date(Date.now()+s.remainingSecs*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
+    setText('layerValue',s.layerText); setText('resinValue',s.resinText); if(!s.busy)setText('runValue',s.runTime); setText('remainingValue',eta?s.remainingTime+' · ~'+eta:s.remainingTime); tickLocalStatus();
     setText('vatValue',s.vatLow?s.vatText+' (low!)':s.vatText); $('vatValue').style.color=s.vatLow?'#ff6b5f':'';
     const wc=s.webControl!==false;
     show('webControlBanner',!wc);
@@ -1969,11 +2080,15 @@ const refreshStatus=async()=>{
   statusInFlight=true;
   try{
     const s=await api('/api/status',null,30000);
+    if(reloadIfFirmwareChanged(s))return;
+    if(updLock&&updSawDown)location.reload();
+    if(updLock&&!updSawDown&&Date.now()-updLockAt>90000){updLock=false;$('updOverlay').classList.remove('on');msg('Update did not start - the printer never went down. Check System > Update on the printer.',true);}
     statusFailCount=0;
     applyStatus(s);
     if(!pendingPrintCmd)msg('',false);
   }catch(e){
     statusFailCount++;
+    if(updLock)updSawDown=true;
     if(statusData&&statusData.busy)msg('Syncing with printer at the next safe network window...',true);
     else msg('Status unavailable: '+e.message,true);
   }finally{statusInFlight=false;}
@@ -2337,16 +2452,17 @@ const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||e
   try{
   const r=await api('/api/print/start?name='+enc(name)+(force?'&force=1':''),{method:'POST'},8000);
   if(r&&r.warning==='low_resin'){if(confirm('Low resin: ~'+r.vatRemainingMl+' ml left in the VAT (estimate).\nStart anyway?'))startPrint(nameEnc,true);return;}
-  msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
+  msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();lpsSynced=false;applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
 const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!confirm('Delete this SD item?'))return;try{await api('/api/files/delete?name='+enc(name),{method:'POST'});msg('Deleted '+name+'.');loadFiles();}catch(e){msg(e.message,true);}};
 const printCommand=async(cmd,confirmText)=>{if(confirmText&&!confirm(confirmText))return;pendingPrintCmd=cmd;applyPendingPrintUi();msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for printer connection...',true);retryPendingPrintCommand();};
+const fmtDur=ms=>{const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>0?h+'h '+m+'m':m+'m '+(s%60)+'s';};
 const tickLocalStatus=()=>{
   if(statusData&&statusData.busy&&localPrintStartedAt){
-    setText('runValue',formatShortTime(Date.now()-localPrintStartedAt));
+    setText('runValue',fmtDur(Date.now()-localPrintStartedAt));
   }
 };
 
-const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton').forEach(e=>e.disabled=disabled);};
+const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton,#backupDownloadButton,#backupSdButton,#restoreButton').forEach(e=>e.disabled=disabled);};
 const configIsLocallyLocked=()=>!!(statusData&&statusData.busy);
 const updateNetworkFields=()=>{$('cfgWebDashboardEnabled').disabled=!$('cfgWifiEnabled').checked;};
 const confirmNetworkToggle=e=>{
@@ -2386,7 +2502,7 @@ const loadConfig=async()=>{
     const c=await api('/api/config');
     connectConfig=c;
     $('cfgLayerHeight').value=Number(c.layerHeight).toFixed(2); $('cfgBaseExposure').value=c.baseExposure; $('cfgRegularExposure').value=c.regularExposure; $('cfgBaseLayers').value=c.baseLayers; $('cfgTransitionLayers').value=c.transitionLayers;
-    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled;
+    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled; $('cfgBootUpdateCheck').checked=!!c.bootUpdateCheck;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
@@ -2409,13 +2525,17 @@ window.deleteFile=deleteFile;
 window.filesNav=d=>{filesPage+=d;renderFiles();};
 $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();filesPage=0;renderFiles();});
 
-$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
+$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadButton').classList.add('secondary');$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!confirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?'))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!confirm('Reset MQTT settings?'))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configConnectResetButton').addEventListener('click',async()=>{if(!confirm('Reset TinyMaker Connect settings and forget this printer token?'))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!confirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('backupDownloadButton').addEventListener('click',async()=>{try{const r=await fetch('/api/config/backup',{cache:'no-store'});if(!r.ok)throw new Error('backup failed (HTTP '+r.status+')');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tinymaker-backup.json';a.click();URL.revokeObjectURL(a.href);msg('Backup downloaded.');}catch(e){msg(e.message,true);}});
+$('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');}catch(e){msg(e.message,true);}});
+$('restoreButton').addEventListener('click',()=>$('restoreFile').click());
+$('restoreFile').addEventListener('change',async()=>{const f=$('restoreFile').files[0];$('restoreFile').value='';if(!f)return;if(!confirm('Restore all settings from '+f.name+'? Current settings will be overwritten.'))return;try{const t=await f.text();await api('/api/config/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:t});msg('Settings restored from backup.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
 $('disableDryRunButton').addEventListener('click',async()=>{if(!confirm('Disable dry run mode? Future prints will use the UV LEDs.'))return;try{await api('/api/config/dry-run?enabled=0',{method:'POST'});msg('Dry run disabled.');loadConfig();refreshStatus();}catch(e){msg(e.message,true);}});
 $('vatRefillButton').addEventListener('click',async()=>{if(!confirm('Mark the VAT as refilled? The resin estimate restarts from a full VAT.'))return;try{const r=await api('/api/vat/refilled',{method:'POST'});msg('VAT marked as refilled ('+r.vatRemainingMl+' ml).');refreshStatus();}catch(e){msg(e.message,true);}});
 $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
@@ -2490,7 +2610,7 @@ const installFirmware=async v=>{
   let warn='Install '+(v||'the latest firmware')+'? The printer reboots when done.';
   if(v&&updInstalledVer&&cmpVer(v,updInstalledVer)<0)warn='Downgrade to '+v+'? The older firmware may ignore or reset newer settings.\nThe printer reboots when done.';
   if(!confirm(warn))return;
-  try{await api('/api/update/install'+(v?'?version='+v:''),{method:'POST'},20000);msg('Updating... the printer reboots when done.');}catch(e){msg(e.message,true);}
+  try{await api('/api/update/install'+(v?'?version='+v:''),{method:'POST'},20000);msg('Updating... the printer reboots when done.');showUpdLock();}catch(e){msg(e.message,true);}
 };
 $('updInstallLatest').addEventListener('click',()=>installFirmware(''));
 $('updInstallSelected').addEventListener('click',()=>installFirmware($('updVersionSelect').value));
@@ -2502,10 +2622,12 @@ $('updUploadForm').addEventListener('submit',async e=>{
   try{
     const r=await fetch('/update',{method:'POST',body:new FormData(e.target)});
     if(!r.ok)throw new Error('update rejected (HTTP '+r.status+')');
-    msg('Firmware flashed. The printer is rebooting...');
+    msg('Firmware flashed. The printer is rebooting...');showUpdLock();
   }catch(err){msg(err.message,true);}
   $('updUploadButton').disabled=false;
 });
+$('updFile').addEventListener('change',()=>$('updUploadButton').classList.toggle('secondary',!$('updFile').files.length));
+$('uploadFile').addEventListener('change',()=>$('uploadButton').classList.toggle('secondary',!$('uploadFile').files.length));
 
 $('pauseButton').addEventListener('click',()=>printCommand('pause','Pause this print?'));
 $('resumeButton').addEventListener('click',()=>printCommand('resume','Resume this print?'));
@@ -2552,7 +2674,7 @@ unsigned long otaCheckedAt = 0;   // millis() of the last successful check
 // Blocking (a few seconds); the caller should show "checking..." first.
 // A successful result is cached for 5 min so reopening the Update screen
 // (or bouncing to/from "Install from file") does not re-block the UI.
-void otaCheckLatest() {
+void otaCheckLatest(uint16_t timeoutMs) {
   if ((otaState == 2 || otaState == 3) && millis() - otaCheckedAt < 300000UL)
     return;                        // recent successful check - reuse it
   otaState = 1;
@@ -2563,8 +2685,8 @@ void otaCheckLatest() {
   WiFiClientSecure client;
   client.setInsecure();            // home LAN: skip cert validation
   HTTPClient https;
-  https.setConnectTimeout(6000);
-  https.setTimeout(6000);
+  https.setConnectTimeout(timeoutMs);
+  https.setTimeout(timeoutMs);
   if (!https.begin(client, OTA_VERSION_URL)) { otaState = 4; return; }
 
   int code = https.GET();
@@ -2591,9 +2713,17 @@ void otaCheckLatest() {
   https.end();
 }
 
+void otaCheckLatest() { otaCheckLatest(6000); }
+
 const char *otaLatestVerStr() { return otaLatestVer.c_str(); }
 int  otaVersionState()        { return otaState; }
 bool otaHasUpdate()           { return otaState == 3 && otaBinUrl.length() > 0; }
+
+void otaBootCheckMaybePrompt() {
+  if (!bootUpdateCheckEnabled || WiFi.status() != WL_CONNECTED) return;
+  otaCheckLatest(2500);
+  if (otaHasUpdate()) screenBootUpdatePrompt();
+}
 
 // Download a firmware image over HTTPS and flash it. Shows progress on the
 // LCD; reboots on success. Shared by "Install latest" and the version picker.
@@ -2792,6 +2922,9 @@ void network_setup() {
   server.on("/api/config/defaults", HTTP_POST, handleApiConfigDefaults);
   server.on("/api/config/mqtt/defaults", HTTP_POST, handleApiConfigMqttDefaults);
   server.on("/api/config/connect/defaults", HTTP_POST, handleApiConfigConnectDefaults);
+  server.on("/api/config/backup", HTTP_GET, handleApiConfigBackupGet);
+  server.on("/api/config/backup/sd", HTTP_POST, handleApiConfigBackupSd);
+  server.on("/api/config/restore", HTTP_POST, handleApiConfigRestore);
   server.on("/api/config/dry-run", HTTP_POST, handleApiConfigDryRun);
   server.on("/api/connect/test", HTTP_POST, handleApiConnectTest);
   server.on("/api/connect/register", HTTP_POST, handleApiConnectRegister);
@@ -2838,9 +2971,17 @@ void network_setup() {
   });
   ArduinoOTA.begin();
 
+  // Background SNTP sync (UTC, non-blocking). The dashboard computes the
+  // print-ETA in the browser's own timezone, so nothing here depends on
+  // this succeeding - it seeds on-device time for future features.
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+
   String ip = "IP: " + WiFi.localIP().toString();
   netMessage("WiFi connected", ip.c_str());
-  delay(1500);
+  delay(700);
+  otaBootCheckMaybePrompt();
+  if (screen == 424) return;
+  delay(800);
 }
 
 // ===================================================================================
@@ -2902,6 +3043,12 @@ void wifiInfoValues() {
     gfx2->print(r);
     gfx2->print(" dBm ");
     gfx2->print(r > -60 ? "(Good)" : (r > -75 ? "(OK)" : "(Weak)"));
+    // Same green strength bars as the main-menu badge/dashboard: RSSI
+    // > -60 = 3 bars, > -75 = 2, else 1; unlit bars stay dark grey.
+    int n = r > -60 ? 3 : (r > -75 ? 2 : 1);
+    gfx2->fillRect(142, 31, 3, 4,  n >= 1 ? GREEN : DARKGREY);
+    gfx2->fillRect(147, 27, 3, 8,  n >= 2 ? GREEN : DARKGREY);
+    gfx2->fillRect(152, 23, 3, 12, n >= 3 ? GREEN : DARKGREY);
     gfx2->setCursor(5, 55);
     gfx2->print("IP: ");
     gfx2->print(WiFi.localIP());

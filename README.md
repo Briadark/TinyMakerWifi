@@ -4,6 +4,8 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 
 ![TinyMaker palm-sized resin 3D printer](Images/Palm_Sized.jpg)
 
+📖 **[Illustrated user manual](https://slibbinas.github.io/TinyMakerWifi/manual/)** — step by step from the first flash to Home Assistant, with screenshots and an FAQ. Also one tap away from the printer's dashboard (the *Manual* link in the header).
+
 ## Features
 
 * **WiFi setup via captive portal** — no credentials in code, configured from your phone on first boot
@@ -14,13 +16,17 @@ Modified and extended firmware for the open-source **TinyMaker** MSLA resin 3D p
 * WiFi status indicator (green/grey dot) on the main menu
 * **Model deletion from the printer** — long-press OK on a model in the Print menu
 * **Import from SD card** — copy an `.sl1`/`.zip` onto the card and it shows up in the Print menu (in blue); press OK to convert it into a printable model. Works without any network, the archive is removed after a successful import
-* **Lifetime print-hours counter** — the About screen shows total printing time (stored in NVS, survives firmware updates)
+* **Lifetime print-hours & UV LED hours counters** — the About screen shows total printing time and total LED-on time (the LED ages by lit time; dry runs don't count). Stored in NVS, survives firmware updates
+* **Settings backup & restore** — one file holds every setting and the lifetime counters: download it, keep it on the SD card, and after a full USB reflash the printer offers to restore everything on first boot
+* **Boot update check** — shortly after WiFi connects at boot the printer checks for new firmware and offers *Install / Later* right on the screen (switchable) *(contributed by [@Briadark](https://github.com/Briadark))*
+* **Exposure calibration test** — cures an 8-bar test strip straight from the printer (System → Advanced), each bar a different exposure; no slicer or SD file needed
+* **Clean Resin Vat** (Maintenance) — full-screen UV exposure cures a thin skin over the vat so debris lifts out in one piece (stock TinyMaker feature, kept and counted into LED hours)
 * **Resin usage estimate** — press UP on the print preview to estimate the resin a model needs — shown in ml AND in vat fills (e.g. `12.4 ml = 0.8 VAT`; vat size adjustable 10–40 ml in Settings, default 15). Live ml is shown while printing
 * **Resin level tracking** — the printer keeps an estimate of how much resin is left in the VAT, warns before starting a print with too little, and can optionally pause mid-print for a refill (see [Resin level & refills](#resin-level--refills))
 * **3D model preview in the dashboard** — open a model's details and press *Preview 3D*: the browser rebuilds the shape from the sliced layers and draws it inside the printer's build-volume box, so you can tell models apart without printing them
 * **3D print progress** — while printing, the dashboard shows the same 3D view filling up in real time: the printed part in color, the rest as a ghost outline. Zero load on the printer (the browser renders from prefetched layers)
 * **WiFi reset** — from the System menu, or by holding the BACK button while powering on
-* **Web dashboard** — open the printer's IP in a browser: SD manager (upload/delete/start), live print status with pause/resume/stop, device config and a dry-run test mode *(contributed by [@Briadark](https://github.com/Briadark))*
+* **Web dashboard** — open the printer's IP in a browser: SD manager (upload/delete/start), live print status with pause/resume/stop and finish-time estimate, device config and a dry-run test mode *(initial version contributed by [@Briadark](https://github.com/Briadark))*
 * **MQTT / Home Assistant** — optional integration with auto-discovery: print state, layers, resin used, **resin left + low-resin alert**, run/remaining time as HA sensors
 * **Firmware updates over WiFi** — self-update from the printer (System → Update) or from the dashboard's **Update tab** (install latest, pick **any version** from a list, or upload a file). PlatformIO OTA for developers. Flashing is blocked while printing.
 * Everything is switchable: WiFi and Web control can be turned off right on the printer (System → Advanced), and build switches still let developers compile the original, network-free firmware from the same code base
@@ -130,13 +136,13 @@ In the **Print** menu, **press and hold OK for ~1.5 seconds** on a model — a *
 
 ## Web dashboard
 
-Open the printer's IP address in any browser for the full dashboard *(contributed by [@Briadark](https://github.com/Briadark))*: live print status and controls, SD card management with one-click start/import, device settings and firmware updates — all in three tabs styled to match the printer's UI.
+Open the printer's IP address in any browser for the full dashboard *(initial version contributed by [@Briadark](https://github.com/Briadark))*: live print status and controls, SD card management with one-click start/import, device settings, backups and firmware updates — all in tabs styled to match the printer's UI.
 
 <img src="Images/mockups/web-dashboard.png" width="420" alt="TinyMakerWiFi web dashboard: live print status, controls and SD manager">
 
 On a desktop-sized screen the dashboard spreads into two columns — here it is in real use, idle with a card full of models:
 
-<img src="Images/screenshots/dashboard-desktop-idle.png" width="640" alt="Real dashboard screenshot on a desktop screen: two-column layout, status card and SD manager with model list">
+<img src="Images/screenshots/dashboard-idle-0140.png" width="640" alt="Real dashboard screenshot on a desktop screen: status card with UV LED time and Manual link, SD manager with model list">
 
 ### 3D preview & live print progress
 
@@ -144,7 +150,7 @@ Every model on the SD card can be previewed in 3D — the browser rebuilds the s
 
 A real print in progress — a plate of teeth with supports, rendered live in the build-volume box:
 
-<img src="Images/screenshots/dashboard-printing-3d.png" width="640" alt="Real dashboard screenshot while printing: status, print controls and the live 3D print progress render">
+<img src="Images/screenshots/printing-eta.png" width="640" alt="Real dashboard screenshot while printing: status with finish-time estimate, print controls and the live 3D print progress render">
 
 ## Advanced menu (WiFi and Web control switches)
 

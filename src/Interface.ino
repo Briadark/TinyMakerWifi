@@ -335,7 +335,7 @@ bool advancedMqttConfigured() {
 }
 
 int advancedOptionCount() {
-  int count = 7; // timeout, dry run, VAT refilled, pause, warn, ask, WiFi
+  int count = 9; // timeout, dry run, VAT refilled, pause, warn, ask, WiFi, boot update, exposure test
   if (wifiEnabled) count++; // web control
   if (wifiEnabled && advancedMqttConfigured()) count++; // MQTT
   return count;
@@ -349,8 +349,10 @@ String advancedLabel(int item) {
   if (item == 5) return "Low resin warn";
   if (item == 6) return "Ask refill";
   if (item == 7) return "WiFi";
-  if (wifiEnabled && item == 8) return "Web control";
-  if (wifiEnabled && advancedMqttConfigured() && item == 9) return "MQTT";
+  if (item == 8) return "Boot update";
+  if (item == 9) return "Exposure test";
+  if (wifiEnabled && item == 10) return "Web control";
+  if (wifiEnabled && advancedMqttConfigured() && item == 11) return "MQTT";
   return "";
 }
 
@@ -365,8 +367,10 @@ String advancedValue(int item) {
   if (item == 5) return String(lowResinThresholdMl) + " ml";
   if (item == 6) return askRefillEnabled ? "On" : "Off";
   if (item == 7) return wifiEnabled ? "On" : "Off";
-  if (wifiEnabled && item == 8) return webDashboardEnabled ? "On" : "Off";
-  if (wifiEnabled && advancedMqttConfigured() && item == 9) return mqttEnabled ? "On" : "Off";
+  if (item == 8) return bootUpdateCheckEnabled ? "On" : "Off";
+  if (item == 9) return String(expTestBarSecs(1)) + "-" + String(expTestBarSecs(8)) + "s strip";
+  if (wifiEnabled && item == 10) return webDashboardEnabled ? "On" : "Off";
+  if (wifiEnabled && advancedMqttConfigured() && item == 11) return mqttEnabled ? "On" : "Off";
   return "";
 }
 
@@ -432,9 +436,14 @@ void advancedOptionsSelect() {
     } else {
       webDashboardEnabled = true;
     }
-  } else if (wifiEnabled && advanced_item == 8) {
+  } else if (advanced_item == 8) {
+    bootUpdateCheckEnabled = !bootUpdateCheckEnabled;
+  } else if (advanced_item == 9) {
+    screenExpTestIntro();       // action item: opens the exposure test flow
+    return;
+  } else if (wifiEnabled && advanced_item == 10) {
     webDashboardEnabled = !webDashboardEnabled;
-  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 9) {
+  } else if (wifiEnabled && advancedMqttConfigured() && advanced_item == 11) {
     mqttEnabled = !mqttEnabled;
   }
   saveDeviceConfig();
@@ -569,7 +578,62 @@ void screenUpdateWifiConfirm(){
   uiButtons("No", "Yes", 0x879F);
   screen = 423;
 }
+
+void screenBootUpdatePrompt(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 21);
+  gfx2->print("Update available");
+  gfx2->setCursor(8, 43);
+  gfx2->print("v");
+  gfx2->print(otaLatestVerStr());
+  uiButtons("Later", "Install", 0x879F);
+  screen = 424;
+}
+
+void screenBootUpdateDisablePrompt(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 21);
+  gfx2->print("Disable boot");
+  gfx2->setCursor(8, 43);
+  gfx2->print("update check?");
+  uiButtons("No", "Yes", 0x879F);
+  screen = 425;
+}
 #endif
+
+/**
+ * Screen 426: offer to restore settings from the SD backup right after a
+ * factory-fresh boot (full USB reflash wiped EEPROM+NVS; the SD survives).
+ * Compiled unconditionally - restore must work in the network-free build too.
+ */
+void screenRestorePrompt(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 21);
+  gfx2->print("Restore settings");
+  gfx2->setCursor(8, 43);
+  gfx2->print("from SD backup?");
+  uiButtons("Skip", "Restore", 0x879F);
+  screen = 426;
+}
+
+void screenRestoreDone(bool ok){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 34);
+  gfx2->print(ok ? "Settings restored" : "Restore failed");
+  delay(1200);
+}
 
 /**
  * @brief Screen 421: Firmware update - installed vs latest, self-update.
@@ -664,9 +728,19 @@ void screen431(){
   gfx2->print("h ");
   gfx2->print((totalPrintSecs % 3600UL) / 60UL);
   gfx2->print("m");
-  gfx2->setCursor(5, 60);
+  gfx2->setCursor(5, 55);
+  gfx2->setTextColor(0x879F);
+  gfx2->print("UV LED: ");
+  gfx2->setTextColor(WHITE);
+  gfx2->print(totalUvLedSecs / 3600UL);
+  gfx2->print("h ");
+  gfx2->print((totalUvLedSecs % 3600UL) / 60UL);
+  gfx2->print("m");
+  // Classic-font setCursor() y is the glyph TOP (7 px tall): the last row
+  // must start by y=73 or it clips past the 80 px panel edge.
+  gfx2->setCursor(5, 64);
   gfx2->print("github.com/slibbinas/");
-  gfx2->setCursor(5, 71);
+  gfx2->setCursor(5, 73);
   gfx2->print("TinyMakerWifi");
   gfx2->setFont(&FreeSans8pt7b); // restore UI font
   screen = 431;
@@ -1723,6 +1797,10 @@ void screen23111(){
     // Update Progress Bar
     gfx2->fillRect(2, 20, 156*Duration/ExposureMillis, 34, PURPLE);
   }
+  if (uvLedEnabled) {  // LED aging: cleaning exposures count too
+    totalUvLedSecs += Duration / 1000UL;
+    saveUvLedTime();
+  }
   if(buttonBackClicked == 0){
     gfx1->fillScreen(BLACK);
     digitalWrite(LED, LOW);
@@ -1742,9 +1820,119 @@ void screen23111(){
     gfx2->setCursor(50, 43);
     gfx2->print("Done! :)");
     delay(600);  
-    digitalWrite(FAN, LOW);    
+    digitalWrite(FAN, LOW);
   }
   screen2311();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Exposure calibration test (Advanced menu, screens 232/2321). Cures an
+ * 8-bar strip straight from the masking LCD - no slicer, no SD. Bar N stays
+ * lit for its own time on a ladder around the configured Regular exposure
+ * (bar 1 shortest, bar 8 longest); the user picks the bar that cured crisply
+ * and dials that time into Settings.
+ */
+// Proportional ladder (0.14.1): fixed multipliers of the Regular setting,
+// bar 5 = 100% = your current value. A fast resin (cures in 3 s) and a slow
+// one (25 s) both get a meaningful spread - fixed +-seconds steps did not
+// (first real strip saturated: every bar past ~8 s looked identical).
+int expTestBarSecs(int bar) {          // bar 1..8 -> seconds
+  static const uint8_t pct[8] = {40, 55, 70, 85, 100, 115, 135, 160};
+  int t = ((int)Regular_Exposure * pct[bar - 1] + 50) / 100;
+  return t < 2 ? 2 : t;
+}
+
+void screenExpTestIntro(){
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 18);
+  gfx2->print("Exposure test strip");
+  gfx2->setTextColor(0x879F);
+  gfx2->setCursor(8, 34);
+  gfx2->print("Resin in vat, no plate.");
+  gfx2->setCursor(8, 48);
+  gfx2->print(String("Cures 8 bars: ") + expTestBarSecs(1) + "-" + expTestBarSecs(8) + "s");
+  uiButtons("Back", "Start", 0x879F);
+  screen = 232;
+}
+
+void runExpTest(){
+  // Running screen - modeled on the Clean Resin Vat exposure (23111)
+  gfx2->fillScreen(BLACK);
+  gfx2->fillRoundRect(0, 0, 160, 80, 5, ORANGE);
+  gfx2->fillRect(2, 20, 156, 34, BLACK);
+  gfx2->fillRoundRect(2, 56, 156, 22, 3, BLACK);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(6, 14);
+  gfx2->print("Exposure test");
+  gfx2->fillRoundRect(6, 58, 72, 18, 2, ORANGE);
+  gfx2->setCursor(16, 71);
+  gfx2->println("Cancel");
+
+  // 8 vertical bars on the masking LCD; one continuous exposure, the
+  // shortest bar is blanked first, so bar N's lit time = its ladder step.
+  int W = gfx1->width(), H = gfx1->height();
+  int slot = W / 8, gap = slot / 6, bw = slot - 2 * gap;
+  int by = H / 6, bh = H - 2 * (H / 6);
+  gfx1->fillScreen(BLACK);
+  // Bar N carries N holes (dots) near its top, so a peeled strip stays
+  // identifiable no matter how it is flipped - count dots, not sides.
+  int r = bh / 60;
+  if (r < 4) r = 4;
+  for (int i = 0; i < 8; i++) {
+    int x0 = i * slot + gap;
+    gfx1->fillRect(x0, by, bw, bh, WHITE);
+    for (int k = 0; k <= i; k++)
+      gfx1->fillCircle(x0 + bw / 2, by + 3 * r + k * 3 * r, r, BLACK);
+  }
+
+  long maxMs = (long)expTestBarSecs(8) * 1000L;
+  int blanked = 0;
+  bool canceled = false;
+  digitalWrite(FAN, HIGH);
+  digitalWrite(LED, uvLedEnabled ? HIGH : LOW);
+  startTime = millis();
+  Duration = 0;
+  while (Duration <= maxMs && !canceled){
+    Duration = millis() - startTime;
+    while (blanked < 8 && Duration >= (long)expTestBarSecs(blanked + 1) * 1000L){
+      gfx1->fillRect(blanked * slot + gap, by, bw, bh, BLACK);
+      blanked++;
+    }
+    if (digitalRead(buttonBack) == LOW) canceled = true;
+    gfx2->fillRect(2, 20, 156 * Duration / maxMs, 34, PURPLE);
+  }
+  gfx1->fillScreen(BLACK);
+  digitalWrite(LED, LOW);
+  digitalWrite(FAN, LOW);
+  if (uvLedEnabled) {                 // LED aging: test exposures count too
+    totalUvLedSecs += Duration / 1000UL;
+    saveUvLedTime();
+  }
+
+  // Result screen: what the bars mean, left to right
+  uiFrame(ORANGE);
+  gfx2->setFont(&FreeSans8pt7b);
+  gfx2->setTextColor(WHITE);
+  gfx2->setTextSize(1);
+  gfx2->setCursor(8, 18);
+  gfx2->print(canceled ? "Test canceled" : "Test strip done");
+  if (!canceled){
+    gfx2->setTextColor(0x879F);
+    gfx2->setCursor(8, 34);
+    gfx2->print(String("Dots 1..8 = ") + expTestBarSecs(1) + ".." + expTestBarSecs(8) + "s");
+    gfx2->setCursor(8, 48);
+    gfx2->print("Set crispest in Settings");
+  }
+  uiButtons("Back", "OK", 0x879F);
+  screen = 2321;
 }
 
 
