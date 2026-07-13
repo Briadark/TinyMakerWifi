@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Backup logo (concept 2, 2026-07-13): printer tower silhouette with a
+       green WiFi status dot, matching the dashboard's connection indicator. -->
+  <rect x="12" y="6" width="14" height="52" rx="4" fill="#e8720c"/>
+  <rect x="8" y="46" width="48" height="12" rx="4" fill="#e8720c"/>
+  <rect x="26" y="20" width="20" height="7" rx="3" fill="#e8720c" opacity=".85"/>
+  <circle cx="50" cy="14" r="6" fill="#35c04d"/>
+  <path d="M42 5 A11 11 0 0 1 58 5" fill="none" stroke="#35c04d" stroke-width="4" stroke-linecap="round" opacity=".8"/>
+</svg>
