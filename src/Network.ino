@@ -1673,78 +1673,96 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
     "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
     "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
+    // Theme boot: apply the saved choice to <html> BEFORE the stylesheet
+    // parses, so a light-theme reload never flashes dark (manual does the same).
+    "<script>(function(){try{if(localStorage.getItem('tmTheme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}})()</script>"
     "<style>"
+    // All colors live in CSS variables; [data-theme=light] swaps the palette
+    // (same accent orange). Keep new rules on variables, not literals.
+    ":root{color-scheme:dark;--bg:#1c1c1e;--wrap:#232326;--card:#2a2a2e;--tile:#202024;--pv:#151517;"
+    "--line:#3a3a3f;--line2:#555;--line3:#444;--text:#eee;--muted:#aaa;--muted2:#8a8a92;"
+    "--accent:#e8720c;--link:#84bcf8;--btnsec:#3c3c42;--btnsec-t:#eee;--danger:#7b2f2f;"
+    "--dis:#555;--dis-t:#aaa;--overlay:rgba(20,20,22,.93);--dim:rgba(20,20,22,.6);"
+    "--toast:#2e2e33;--toast-t:#fff;--warncol:#ffb15f;--banner:#3a2818;--warnbg:#3a2320;"
+    "--subh:#98938a;--fwb:#777;--wbar:#4a4a50}"
+    "[data-theme=light]{color-scheme:light;--bg:#eceef1;--wrap:#f8f9fa;--card:#fff;--tile:#f4f5f7;--pv:#e8eaee;"
+    "--line:#d9dbe0;--line2:#c2c6cd;--line3:#d0d3d8;--text:#1f2124;--muted:#5f6570;--muted2:#6a707a;"
+    "--link:#155fb0;--btnsec:#dcdfe4;--btnsec-t:#26282c;--danger:#b23434;"
+    "--dis:#c9ccd2;--dis-t:#82878f;--overlay:rgba(243,244,246,.93);--dim:rgba(100,104,112,.45);"
+    "--toast:#fff;--toast-t:#1f2124;--warncol:#9a5b00;--banner:#fff1e0;--warnbg:#fdecec;"
+    "--subh:#7a736a;--fwb:#9aa0a8;--wbar:#c8ccd2}"
     "*{box-sizing:border-box}"
-    "body{margin:0;min-height:100vh;background:#1c1c1e;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#eee}"
+    "body{margin:0;min-height:100vh;background:var(--bg);font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text)}"
     // Orange window frame matching the printer's on-screen UI
-    ".wrap{max-width:560px;margin:16px auto;padding:20px 18px;border:2px solid #e8720c;border-radius:14px;background:#232326}"
+    ".wrap{max-width:560px;margin:16px auto;padding:20px 18px;border:2px solid var(--accent);border-radius:14px;background:var(--wrap)}"
     ".head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}"
-    "h1{margin:0;font-size:24px;color:#e8720c}h2{font-size:17px;margin:0 0 12px;color:#eee}.fw{font-size:13px;color:#aaa}"
-    ".card{background:#2a2a2e;border:1px solid #444;border-radius:10px;padding:18px;margin:12px 0}"
+    "h1{margin:0;font-size:24px;color:var(--accent)}h2{font-size:17px;margin:0 0 12px;color:var(--text)}.fw{font-size:13px;color:var(--muted)}"
+    "#themeBtn{color:var(--muted);font-size:16px;text-decoration:none;margin-left:6px}#themeBtn:hover{color:var(--text);text-decoration:none}"
+    ".card{background:var(--card);border:1px solid var(--line3);border-radius:10px;padding:18px;margin:12px 0}"
     ".grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}"
-    ".label{font-size:12px;color:#aaa}.value{font-size:16px;margin-top:4px}"
+    ".label{font-size:12px;color:var(--muted)}.value{font-size:16px;margin-top:4px}"
     ".files{display:grid;gap:8px}.file{display:flex;align-items:center;justify-content:space-between;gap:10px;"
-    "border-top:1px solid #3a3a3f;padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
+    "border-top:1px solid var(--line);padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
     ".rowActions{display:flex;gap:8px;align-items:center}"
-    ".meta{font-size:12px;color:#aaa;margin-top:3px}"
+    ".meta{font-size:12px;color:var(--muted2);margin-top:3px}"
     ".connectTiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}"
-    ".connectTile{background:#202024;border:1px solid #3a3a3f;border-radius:8px;padding:12px;text-decoration:none;color:#eee}.connectTile>a{display:block;color:inherit;text-decoration:none}"
-    ".connectTile:hover{border-color:#e8720c;text-decoration:none}.connectPreview{aspect-ratio:4/3;background:#151517;border:1px solid #3a3a3f;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:10px}"
+    ".connectTile{background:var(--tile);border:1px solid var(--line);border-radius:8px;padding:12px;text-decoration:none;color:var(--text)}.connectTile>a{display:block;color:inherit;text-decoration:none}"
+    ".connectTile:hover{border-color:var(--accent);text-decoration:none}.connectPreview{aspect-ratio:4/3;background:var(--pv);border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:10px}"
     ".connectPreview img{width:100%;height:100%;object-fit:contain}.connectStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}"
-    ".connectStat{border-top:1px solid #3a3a3f;padding-top:7px}.pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.pill{border:1px solid #3a3a3f;border-radius:999px;padding:3px 8px;color:#aaa;font-size:12px}"
+    ".connectStat{border-top:1px solid var(--line);padding-top:7px}.pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.pill{border:1px solid var(--line);border-radius:999px;padding:3px 8px;color:var(--muted);font-size:12px}"
     ".connectActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}"
-    "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}a:visited{color:#84bcf8}"
-    "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
-    "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
+    "a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}a:visited{color:var(--link)}"
+    "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid var(--line2);border-radius:8px;background:var(--bg);color:var(--text)}"
+    "label span{display:block;font-size:13px;color:var(--muted)}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
     ".spanAll{grid-column:1/-1}"
-    ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:#eee}"
+    ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:var(--text)}"
     ".actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}"
     // Tabs: equal-size Dashboard/Settings/Update, active one orange
-    ".toolbar{display:flex;gap:8px;margin:12px 0}.toolbar button,.toolbar .button{width:auto;flex:1;margin-top:0;background:#3c3c42;color:#eee}"
-    ".toolbar .active{background:#e8720c;color:#fff}"
+    ".toolbar{display:flex;gap:8px;margin:12px 0}.toolbar button,.toolbar .button{width:auto;flex:1;margin-top:0;background:var(--btnsec);color:var(--btnsec-t)}"
+    ".toolbar .active{background:var(--accent);color:#fff}"
     // Mini WiFi signal bars (same idea as the printer's badge)
     ".wbars{display:inline-flex;gap:2px;align-items:flex-end;margin-left:8px;vertical-align:middle}"
-    ".wbars i{width:4px;background:#4a4a50;border-radius:1px}.wbars i:nth-child(1){height:5px}"
+    ".wbars i{width:4px;background:var(--wbar);border-radius:1px}.wbars i:nth-child(1){height:5px}"
     ".wbars i:nth-child(2){height:9px}.wbars i:nth-child(3){height:13px}.wbars i.on{background:#2fbf4f}"
-    ".banner{background:#3a2818;border-color:#e8720c}.banner strong{display:block;color:#ffb15f;margin-bottom:4px}"
-    ".progress{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin:10px 0 16px}"
-    ".progress span{display:block;height:100%;width:45%;background:#e8720c;animation:barMove 1.1s infinite linear}"
-    ".storageBar{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin-top:8px}"
-    ".storageBar span{display:block;height:100%;width:0;background:#e8720c;transition:width .2s ease}"
+    ".banner{background:var(--banner);border-color:var(--accent)}.banner strong{display:block;color:var(--warncol);margin-bottom:4px}"
+    ".progress{height:10px;border:1px solid var(--line2);border-radius:999px;overflow:hidden;background:var(--bg);margin:10px 0 16px}"
+    ".progress span{display:block;height:100%;width:45%;background:var(--accent);animation:barMove 1.1s infinite linear}"
+    ".storageBar{height:10px;border:1px solid var(--line2);border-radius:999px;overflow:hidden;background:var(--bg);margin-top:8px}"
+    ".storageBar span{display:block;height:100%;width:0;background:var(--accent);transition:width .2s ease}"
     "@keyframes barMove{0%{transform:translateX(-110%)}100%{transform:translateX(230%)}}"
     // Every standalone button gets a top gap so it never sticks to the content
     // above it (primary buttons used to lack this - secondary had it inline).
     // Buttons laid out in rows/grids zero it below; those containers own spacing.
-    "button,.button{display:inline-block;width:100%;border:0;border-radius:8px;background:#e8720c;color:#fff;padding:12px 14px;margin-top:10px;"
+    "button,.button{display:inline-block;width:100%;border:0;border-radius:8px;background:var(--accent);color:#fff;padding:12px 14px;margin-top:10px;"
     "font-size:15px;font-weight:600;text-align:center;text-decoration:none;cursor:pointer}"
-    ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:#7b2f2f}.secondaryBtn{background:#3c3c42}"
-    "button:disabled{background:#555;color:#aaa;cursor:not-allowed}"
-    ".button.secondary{background:#3c3c42}"
+    ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:var(--danger);color:#fff}.secondaryBtn{background:var(--btnsec);color:var(--btnsec-t)}"
+    "button:disabled{background:var(--dis);color:var(--dis-t);cursor:not-allowed}"
+    ".button.secondary{background:var(--btnsec);color:var(--btnsec-t)}"
     ".grid button,.grid .button,.actions button,.actions .button,.connectActions button,.connectActions .button,.rowActions button,.rowActions .button{margin-top:0}"
     // Full-page lock while a firmware update is in flight; cleared by the
     // automatic reload once the printer answers status polls again.
-    ".updOverlay{position:fixed;inset:0;z-index:99;background:rgba(20,20,22,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
-    ".updOverlay.on{display:flex}.updOverlay h2{color:#e8720c}"
-    ".modal{position:fixed;inset:0;z-index:80;background:rgba(20,20,22,.6);display:flex;align-items:center;justify-content:center;padding:20px}"
+    ".updOverlay{position:fixed;inset:0;z-index:99;background:var(--overlay);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
+    ".updOverlay.on{display:flex}.updOverlay h2{color:var(--accent)}"
+    ".modal{position:fixed;inset:0;z-index:80;background:var(--dim);display:flex;align-items:center;justify-content:center;padding:20px}"
     ".modal.hidden{display:none}"
-    ".modalCard{background:#1c1c1e;border:1px solid #3a3a3f;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
-    ".modalText{color:#eee;font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
+    ".modalCard{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
+    ".modalText{color:var(--text);font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
     // .button.secondary (0,2,0) outranks .modalBtns button (0,1,1) - without the
     // extra selector Cancel keeps its 10px margin-top and renders shorter than OK.
     ".modalBtns{display:flex;gap:10px}.modalBtns button,.modalBtns .button.secondary{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
-    ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
-    ".subhead{grid-column:1/-1;margin-top:6px;padding-top:14px;border-top:1px solid #3a3a3f;font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#98938a}"
+    ".fwbuild{color:var(--fwb);font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
+    ".subhead{grid-column:1/-1;margin-top:6px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:var(--subh)}"
     ".pwWrap{position:relative;display:block}.pwWrap input{width:100%;padding-right:40px}"
-    ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:#aaa}.eyeBtn:hover{color:#eee}"
-    ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
-    ".warn{color:#ffb15f}"
+    ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:var(--muted)}.eyeBtn:hover{color:var(--text)}"
+    ".updSpin{width:34px;height:34px;border:4px solid var(--btnsec);border-top-color:var(--accent);border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
+    ".warn{color:var(--warncol)}"
     ".hidden{display:none}"
-    ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
+    ".hint{font-size:13px;color:var(--muted);margin:10px 0 0;line-height:1.4}"
     // Top-center: a bottom toast hid behind the action buttons and blended in.
     // Brand-orange border + slide-in: a static grey box was easy to miss.
-    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#2e2e33;color:#fff;border:2px solid #e8720c;border-radius:10px;padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:14px;font-weight:600;line-height:1.4;animation:toastIn .25s ease}"
+    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:var(--toast);color:var(--toast-t);border:2px solid var(--accent);border-radius:10px;padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:14px;font-weight:600;line-height:1.4;animation:toastIn .25s ease}"
     "@keyframes toastIn{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}"
-    "#statusMsg.warn{background:#3a2320;border-color:#d4705c;color:#ffb15f}"
+    "#statusMsg.warn{background:var(--warnbg);border-color:#d4705c;color:var(--warncol)}"
     "#statusMsg:empty{display:none}"
     ".configGrid .hint{grid-column:1/-1}"
     "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}}"
@@ -1783,7 +1801,7 @@ void handleRootPage() {
 #ifdef GIT_REV
     GIT_REV
 #endif
-    R"SPA("></span> · <a href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a></div></div></div>
+    R"SPA("></span> · <a id='manualLink' href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a><a href='#' id='themeBtn' title='Light / dark theme'>&#9680;</a></div></div></div>
 
 <section id='dryRunBanner' class='card banner hidden'>
   <strong>Dry run mode enabled.</strong>
@@ -1800,7 +1818,7 @@ void handleRootPage() {
 
 <div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
 
-<div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:#eee;font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
+<div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:var(--text);font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -2775,6 +2793,11 @@ $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
 $('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
 $('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
+// Light/dark toggle: flips the html data-theme attribute the boot script set,
+// persists to localStorage and keeps the Manual link's theme param in sync.
+const applyThemeLink=()=>{const l=document.documentElement.getAttribute('data-theme')==='light';$('manualLink').href='https://slibbinas.github.io/TinyMakerWifi/manual/'+(l?'':'?theme=dark');};
+$('themeBtn').addEventListener('click',e=>{e.preventDefault();const toLight=document.documentElement.getAttribute('data-theme')!=='light';if(toLight)document.documentElement.setAttribute('data-theme','light');else document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('tmTheme',toLight?'light':'dark');}catch(err){}applyThemeLink();});
+applyThemeLink();
 $('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
 $('tgHelpModal').addEventListener('click',e=>{if(e.target===$('tgHelpModal'))show('tgHelpModal',false);});
 $('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
@@ -3337,6 +3360,34 @@ void network_setup() {
     // No credentials yet (first boot / after Reset WiFi): captive portal
     // in NON-blocking mode so we can draw the bar filling toward the
     // 120 s timeout while wm.process() serves the portal.
+    // Branded to match the dashboard: dark theme + orange accent + project
+    // logo/version and reference links (the phone is offline here, so the
+    // URLs are for later - jot-down info, not navigation).
+    wm.setDarkMode(true);
+    wm.setCustomHeadElement(
+      "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+      "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+      "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+      "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
+      "<style>button{background:#e8720c;border:0}button:hover,button:focus{background:#c95f06}"
+      "a,a:visited{color:#4da3ff}</style>");
+    wm.setCustomMenuHTML(
+      "<div style='text-align:center;margin:6px 0 16px'>"
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='56' height='56'>"
+      "<rect x='8' y='40' width='48' height='9' rx='3' fill='#e8720c'/>"
+      "<rect x='14' y='27' width='36' height='9' rx='3' fill='#e8720c' opacity='.75'/>"
+      "<rect x='20' y='14' width='24' height='9' rx='3' fill='#e8720c' opacity='.5'/>"
+      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='#4da3ff' stroke-width='5' stroke-linecap='round'/></svg>"
+      "<div style='font-size:15px;font-weight:600;margin-top:2px'>TinyMakerWifi"
+#ifdef FIRMWARE_VERSION
+      " v" FIRMWARE_VERSION
+#endif
+      "</div>"
+      "<div style='font-size:12px;color:#888;line-height:1.6;margin-top:6px'>"
+      "Pick your home WiFi below - the printer connects and shows its address.<br>"
+      "Manual: slibbinas.github.io/TinyMakerWifi/manual<br>"
+      "Project: tinymakerwifi.com &middot; Printer: tinymaker3d.com</div></div>");
     wm.setConfigPortalBlocking(false);
     wm.startConfigPortal("TinyMaker-Setup");
     netProgressStart("WiFi setup - join AP:", "TinyMaker-Setup");
