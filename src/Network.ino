@@ -1878,14 +1878,8 @@ void handleRootPage() {
 <section id='connectView' class='card hidden'>
   <h2>TinyMaker Connect</h2>
   <div id='connectReadyBox' class='hidden'>
-    <div class='grid'>
-      <div><div class='label'>Status</div><div id='connectStatusValue' class='value'>Registered</div></div>
-      <div><div class='label'>Printer ID</div><div id='connectPrinterIdValue' class='value'>-</div></div>
-      <div><div class='label'>Server</div><div id='connectServerValue' class='value'>-</div></div>
-      <div><div class='label'>Leaderboard</div><div id='connectLeaderboardValue' class='value'>-</div></div>
-    </div>
+    <div class='hint' style='margin-top:0'>Registered as <b id='connectPrinterIdValue'>-</b> &middot; <a href='#' id='connectSettingsButton'>Connect settings</a></div>
     <div id='connectReadyHint' class='hint'>This printer is ready to publish and manage TinyMaker Connect models.</div>
-    <button id='connectSettingsButton' class='button secondary' type='button'>Connect settings</button>
   </div>
   <div id='connectPublishBox' class='hidden' style='margin-top:14px'>
     <h2>Share model</h2>
@@ -2706,16 +2700,11 @@ const updateConnectView=c=>{
   show('connectSetupBox',!registered);
   if(registered){
     setText('connectPrinterIdValue',id);
-    setText('connectServerValue',c.connectBaseUrl||'https://tinymaker.inductie.nu');
-    setText('connectLeaderboardValue',c.connectLeaderboardOptIn?'Enabled':'Off');
-    setText('connectStatusValue',c.connectEnabled?'Registered':'Registered, disabled');
-    $('connectReadyHint').textContent=c.connectEnabled?'This printer is ready to publish and manage TinyMaker Connect models.':'Connect is registered but disabled. Enable it in settings before publishing or syncing.';
+    $('connectReadyHint').textContent=c.connectEnabled?'This printer is ready to publish and manage TinyMaker Connect models.':'Connect is disabled in Settings - enable it to publish or sync.';
   }else{
     $('connectSetupHint').textContent=c.connectLastStatus?('Last status: '+c.connectLastStatus):'Setup uses the default TinyMaker Connect server. You can change the server URL before registering.';
   }
-  const locked=!!(statusData&&statusData.busy)||!!(statusData&&statusData.webControl===false);
-  $('connectSetupButton').disabled=locked;
-  $('connectSettingsButton').disabled=locked;
+  $('connectSetupButton').disabled=!!(statusData&&statusData.busy)||!!(statusData&&statusData.webControl===false);
   show('modelShareButton',connectIsReady()&&!!selectedModel);
 };
 const loadConfig=async()=>{
@@ -2727,7 +2716,7 @@ const loadConfig=async()=>{
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
-    const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Token is stored. '+(c.connectLeaderboardOptIn?'Leaderboard sharing is enabled.':'Leaderboard sharing is off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
+    const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Publish token stored'+(c.connectTokenTail?(' (ends in '+c.connectTokenTail+')'):'')+' - cannot be viewed. '+(c.connectLeaderboardOptIn?'Leaderboard sharing on.':'Leaderboard sharing off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
     $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
     $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token: ********'+(c.tgTokenTail||'')+' (hidden) - type a new one to replace it'):'Paste the token from @BotFather';
     $('tgHint').textContent=(c.tgTokenSet?('Bot token saved (last 4 chars: '+(c.tgTokenTail||'?')+' - check they match your token). '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
@@ -2796,7 +2785,7 @@ $('connectSetupButton').addEventListener('click',async()=>{
   $('cfgConnectBaseUrl').focus();
   msg('Check the Connect settings, then test the server and register.');
 });
-$('connectSettingsButton').addEventListener('click',async()=>{openView('config');await loadConfig();updateConnectFields();const t=$('connectFields').classList.contains('hidden')?$('cfgConnectEnabled').parentElement:$('connectFields');t.scrollIntoView({behavior:'smooth',block:'center'});});
+$('connectSettingsButton').addEventListener('click',async e=>{e.preventDefault();openView('config');await loadConfig();updateConnectFields();const t=$('connectFields').classList.contains('hidden')?$('cfgConnectEnabled').parentElement:$('connectFields');t.scrollIntoView({behavior:'smooth',block:'center'});});
 
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};

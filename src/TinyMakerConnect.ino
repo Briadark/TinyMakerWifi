@@ -245,10 +245,13 @@ String tinymakerConnectConfigJson() {
   out += jsonEscape(connectPrinterPublicId);
   out += "\",\"connectTokenSet\":";
   out += connectPublishToken.length() > 0 ? "true" : "false";
-  // The publish token authorizes share/manage/import calls - hand it to the
-  // browser only while Web control is on; a view-only dashboard gets none
+  // Last 4 chars only, for a "token is stored" hint without echoing the secret.
+  out += ",\"connectTokenTail\":\"";
+  out += jsonEscape(connectPublishToken.length() > 4 ? connectPublishToken.substring(connectPublishToken.length() - 4) : "");
+  // The full publish token authorizes share/manage/import calls - hand it to
+  // the browser only while Web control is on; a view-only dashboard gets none
   // (same rule as the MQTT password and the Telegram bot token).
-  out += ",\"connectPublishToken\":\"";
+  out += "\",\"connectPublishToken\":\"";
   out += webDashboardRuntimeEnabled() ? jsonEscape(connectPublishToken) : String("");
   out += "\",\"connectLastStatus\":\"";
   out += jsonEscape(connectLastStatus);
