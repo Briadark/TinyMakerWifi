@@ -81,6 +81,11 @@ String uploadPath;      // e.g. "/Benchy.sl1"
 String modelName;       // e.g. "Benchy"
 bool uploadOk = false;
 bool uploadRejected = false;
+File previewUploadFile;
+String previewUploadName;
+String previewUploadPath;
+bool previewUploadOk = false;
+bool previewUploadRejected = false;
 unsigned long otaShownBytes = 0;   // progress counter (upload + web OTA)
 unsigned long mqttLastAttemptMs = 0;
 unsigned long mqttLastPublishMs = 0;
@@ -142,13 +147,20 @@ bool sdCardUsage(uint64_t &totalBytes, uint64_t &freeBytes) {
   return totalBytes > 0;
 }
 
+String limitedUploadArg(const char *name, uint16_t maxLen) {
+  String v = server.arg(name);
+  v.trim();
+  if (v.length() > maxLen) v = v.substring(0, maxLen);
+  return v;
+}
+
 // Streaming part - called repeatedly with chunks of the multipart body
 void handleUploadData() {
   HTTPUpload &up = server.upload();
 
   if (up.status == UPLOAD_FILE_START) {
     modelName = safeModelName(up.filename);
-    uploadPath = "/" + modelName + ".zip";
+    uploadPath = "/.tm_upload_" + String((uint32_t)millis()) + ".zip";
     uploadOk = false;
     uploadRejected = false;
     otaShownBytes = 0;
@@ -220,18 +232,65 @@ void finishUpload() {
   }
 
   bool ok = false;
+  String error = "unpack failed";
+  ModelImportResult result;
   if (uploadOk) {
     String dest = "/" + modelName;
-    ok = unpackModel(uploadPath.c_str(), dest.c_str());
+    bool existingPath = sdPathExists(dest);
+    bool existingModel = existingPath && validPrintableModel(modelName);
+    String action = limitedUploadArg("action", 16);
+
+    if (existingPath && action != "replace" && action != "rename") {
+      String out = "{\"ok\":false,\"error\":\"model already exists\",\"conflict\":true,\"name\":\"";
+      out += jsonEscape(modelName);
+      out += "\",";
+      if (existingModel) appendModelCompareJson(out, "existing", modelName);
+      else out += "\"existing\":null";
+      out += ",";
+      appendZipCompareJson(out, "incoming", uploadPath.c_str());
+      out += "}";
+      SD.remove(uploadPath.c_str());
+      uploadOk = false;
+      server.send(409, "application/json", out);
+      netMessage("Upload blocked", "Model exists");
+      delay(1500);
+      screen1();
+      return;
+    }
+
+    ModelImportOptions options;
+    options.replace = action == "replace";
+    options.autoRename = action == "rename";
+    options.source = limitedUploadArg("source", 24);
+    if (options.source.length() == 0) options.source = "dashboard_upload";
+    options.connectPublicId = limitedUploadArg("connect_public_id", 32);
+    options.connectUrl = limitedUploadArg("connect_url", 160);
+    options.originalCredits = limitedUploadArg("original_credits", 160);
+    options.licenseName = limitedUploadArg("license", 32);
+    if (server.hasArg("resin_ml")) {
+      options.resinKnown = true;
+      options.resinMl = server.arg("resin_ml").toDouble();
+    }
+
+    ok = importZipModel(uploadPath.c_str(), modelName, options, result, error);
     SD.remove(uploadPath.c_str()); // free SD space, keep browser list clean
   }
   if (ok) {
-    server.send(201, "application/json", "{\"done\":true}");
-    netMessage("Model ready:", modelName.c_str());
+    String out = "{\"ok\":true,\"done\":true,\"name\":\"";
+    out += jsonEscape(result.finalName);
+    out += "\",\"renamed\":";
+    out += result.renamed ? "true" : "false";
+    out += ",\"layers\":";
+    out += String(result.summary.printLayers);
+    out += ",\"heightMm\":";
+    out += String(result.summary.heightMm, 2);
+    out += "}";
+    server.send(201, "application/json", out);
+    netMessage("Model ready:", result.finalName.c_str());
     delay(1500);
   } else {
     DBGLN("Unpack FAILED");
-    server.send(500, "application/json", "{\"error\":\"unpack failed\"}");
+    server.send(500, "application/json", "{\"error\":\"" + jsonEscape(error) + "\"}");
     netMessage("Upload FAILED", modelName.c_str());
     delay(1500);
   }
@@ -239,6 +298,105 @@ void finishUpload() {
   // Returning to the main menu keeps the 'screen' state machine consistent;
   // the new model appears in Print menu (folder list is re-read on entry).
   screen1();
+}
+
+void handlePreviewUploadData() {
+  HTTPUpload &up = server.upload();
+
+  if (up.status == UPLOAD_FILE_START) {
+    previewUploadName = server.arg("name");
+    previewUploadPath = "/" + previewUploadName + "/preview.png";
+    previewUploadOk = false;
+    previewUploadRejected = false;
+
+    if (printerBusy() || !webDashboardRuntimeEnabled() || !sdCardReady() ||
+        !validPrintableModel(previewUploadName)) {
+      previewUploadRejected = true;
+      return;
+    }
+
+    SD.remove(previewUploadPath.c_str());
+    previewUploadFile = SD.open(previewUploadPath.c_str(), FILE_WRITE);
+    if (!previewUploadFile) {
+      previewUploadRejected = true;
+      return;
+    }
+  }
+  else if (up.status == UPLOAD_FILE_WRITE) {
+    if (previewUploadRejected) return;
+    if (up.totalSize > 524288) {
+      previewUploadRejected = true;
+      if (previewUploadFile) previewUploadFile.close();
+      SD.remove(previewUploadPath.c_str());
+      return;
+    }
+    if (previewUploadFile) previewUploadFile.write(up.buf, up.currentSize);
+  }
+  else if (up.status == UPLOAD_FILE_END) {
+    if (previewUploadRejected) return;
+    if (previewUploadFile) {
+      previewUploadFile.close();
+      previewUploadOk = true;
+    }
+  }
+  else if (up.status == UPLOAD_FILE_ABORTED) {
+    if (previewUploadFile) previewUploadFile.close();
+    SD.remove(previewUploadPath.c_str());
+  }
+}
+
+void finishPreviewUpload() {
+  if (previewUploadRejected) {
+    previewUploadRejected = false;
+    previewUploadOk = false;
+    if (printerBusy()) sendApiError(409, "printer busy");
+    else if (!webDashboardRuntimeEnabled()) sendApiError(403, "web control is off - enable it on the printer (System > Advanced)");
+    else if (!sdCardReady()) sendApiError(503, "sd card unavailable");
+    else if (!validPrintableModel(previewUploadName)) sendApiError(404, "model not found");
+    else sendApiError(400, "preview upload failed");
+    return;
+  }
+
+  if (!previewUploadOk) {
+    sendApiError(400, "preview upload failed");
+    return;
+  }
+
+  previewUploadOk = false;
+  sendApiOk("\"preview\":true");
+}
+
+void handleApiFileModelPreview() {
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+  if (!sdCardReady()) {
+    sendApiError(503, "sd card unavailable");
+    return;
+  }
+
+  String name = server.arg("name");
+  if (!validPrintableModel(name)) {
+    sendApiError(404, "model not found");
+    return;
+  }
+
+  String path = "/" + name + "/preview.png";
+  File f = SD.open(path.c_str());
+  if (!f) {
+    sendApiError(404, "preview not found");
+    return;
+  }
+
+  server.sendHeader("Cache-Control", "max-age=86400");
+  server.setContentLength(f.size());
+  server.send(200, "image/png", "");
+  uint8_t buf[512];
+  int n;
+  WiFiClient client = server.client();
+  while ((n = f.read(buf, sizeof(buf))) > 0) client.write(buf, n);
+  f.close();
 }
 
 // ===================================================================================
@@ -540,6 +698,76 @@ bool estimateModelResin(const String &name, int printLayers, double &ml) {
   return true;
 }
 
+uint64_t sdEntrySizeRecursive(const String &path) {
+  File entry = SD.open(path.c_str());
+  if (!entry) return 0;
+  if (!entry.isDirectory()) {
+    uint64_t size = (uint64_t)entry.size();
+    entry.close();
+    return size;
+  }
+
+  uint64_t total = 0;
+  while (true) {
+    File child = entry.openNextFile();
+    if (!child) break;
+    char name[101];
+    child.getName(name, sizeof(name));
+    bool isDir = child.isDirectory();
+    uint64_t size = (uint64_t)child.size();
+    child.close();
+    String childPath = path + "/" + String(name);
+    total += isDir ? sdEntrySizeRecursive(childPath) : size;
+  }
+  entry.close();
+  return total;
+}
+
+void appendSummaryObjectJson(String &out, const ModelSummary &summary, uint64_t sizeBytes) {
+  out += "{\"layers\":";
+  out += String(summary.printLayers);
+  out += ",\"heightMm\":";
+  out += String(summary.heightMm, 2);
+  out += ",\"estimatedSecs\":";
+  out += String(summary.estimatedSecs);
+  out += ",\"estimatedTime\":\"";
+  out += formatDuration(summary.estimatedSecs);
+  out += "\",\"sizeBytes\":\"";
+  out += uint64Json(sizeBytes);
+  out += "\"}";
+}
+
+void appendModelCompareJson(String &out, const char *key, const String &name) {
+  int printLayers = 0;
+  float heightMm = 0;
+  uint32_t timeSecs = 0;
+  out += "\"";
+  out += key;
+  out += "\":";
+  if (!modelStats(name, printLayers, heightMm, timeSecs)) {
+    out += "null";
+    return;
+  }
+
+  ModelSummary summary;
+  summary.printLayers = printLayers;
+  summary.heightMm = heightMm;
+  summary.estimatedSecs = timeSecs;
+  appendSummaryObjectJson(out, summary, sdEntrySizeRecursive("/" + name));
+}
+
+void appendZipCompareJson(String &out, const char *key, const char *zipPath) {
+  ModelSummary summary;
+  out += "\"";
+  out += key;
+  out += "\":";
+  if (!scanZipModel(zipPath, summary)) {
+    out += "null";
+    return;
+  }
+  appendSummaryObjectJson(out, summary, summary.sizeBytes);
+}
+
 long formLong(const char *name, long fallback, long minVal, long maxVal) {
   if (!server.hasArg(name)) return fallback;
   long v = server.arg(name).toInt();
@@ -581,6 +809,7 @@ bool safeRootName(const String &name) {
 
 bool rootEntryManaged(const String &name, bool isDir) {
   if (!safeRootName(name)) return false;
+  if (name.startsWith(".tm_")) return false;
   if (isDir) {
     File probe = SD.open(("/" + name + "/1.png").c_str());
     if (!probe) return false;
@@ -675,6 +904,14 @@ void handleApiFiles() {
     out += "\"";
     out += uint64Json(bytes);
     out += "\"";
+    if (isDir) {
+      String publicId;
+      if (getModelMetadataConnectPublicId(name, publicId)) {
+        out += ",\"connectPublicId\":\"";
+        out += jsonEscape(publicId);
+        out += "\"";
+      }
+    }
     out += "}";
     shown++;
   }
@@ -723,21 +960,67 @@ void handleApiFileModel() {
   out += String(timeSecs);
   out += ",\"estimatedTime\":\"";
   out += formatDuration(timeSecs);
-  out += "\"";
+  out += "\",\"preview\":";
+  out += sdPathExists("/" + name + "/preview.png") ? "true" : "false";
 
-  if (server.hasArg("estimate")) {
-    double ml = 0;
-    bool ok = estimateModelResin(name, printLayers, ml);
-    out += ",\"resinEstimated\":";
-    out += ok ? "true" : "false";
-    if (ok) {
-      out += ",\"resinMl\":";
-      out += String(ml, 1);
-    }
+  String connectPublicId;
+  if (getModelMetadataConnectPublicId(name, connectPublicId)) {
+    out += ",\"connectPublicId\":\"";
+    out += jsonEscape(connectPublicId);
+    out += "\"";
+  }
+
+  double ml = 0;
+  bool resinKnown = getModelMetadataResin(name, ml);
+  bool resinOk = resinKnown;
+  if (!resinKnown && server.hasArg("estimate")) {
+    resinOk = estimateModelResin(name, printLayers, ml);
+    if (resinOk) setModelMetadataResin(name, ml);
+  }
+  out += ",\"resinEstimated\":";
+  out += resinOk ? "true" : "false";
+  if (resinOk) {
+    out += ",\"resinMl\":";
+    out += String(ml, 1);
   }
 
   out += "}";
   server.send(200, "application/json", out);
+}
+
+void handleApiFileModelMetadata() {
+  if (rejectIfWebControlOff()) return;
+  if (printerBusy()) {
+    sendApiError(409, "printer busy");
+    return;
+  }
+  if (!sdCardReady()) {
+    sendApiError(503, "sd card unavailable");
+    return;
+  }
+
+  String name = formString("name", "", 100);
+  if (!validPrintableModel(name)) {
+    sendApiError(404, "model not found");
+    return;
+  }
+
+  ModelImportOptions options;
+  options.connectPublicId = formString("connect_public_id", "", 32);
+  options.connectUrl = formString("connect_url", "", 160);
+  options.originalCredits = formString("original_credits", "", 160);
+  options.licenseName = formString("license", "", 32);
+  if (server.hasArg("resin_ml")) {
+    options.resinKnown = true;
+    options.resinMl = server.arg("resin_ml").toDouble();
+  }
+  String sharedModelName = formString("shared_model_name", "", 120);
+
+  if (!updateModelMetadataConnectShare(name, options, sharedModelName)) {
+    sendApiError(500, "metadata update failed");
+    return;
+  }
+  sendApiOk("\"metadata\":true");
 }
 
 bool deleteSdItem(const String &requestedName, String &error) {
@@ -1684,6 +1967,10 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".connectPreview img{width:100%;height:100%;object-fit:contain}.connectStats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}"
     ".connectStat{border-top:1px solid #3a3a3f;padding-top:7px}.pills{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.pill{border:1px solid #3a3a3f;border-radius:999px;padding:3px 8px;color:#aaa;font-size:12px}"
     ".connectActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}"
+    ".connectTabs{display:flex;gap:8px;margin-top:14px}.connectTabs button{width:auto;flex:1;margin-top:0;background:#3c3c42}.connectTabs button.active{background:#e8720c}"
+    ".leaderRows{display:grid;gap:8px}.leaderRow{display:grid;grid-template-columns:36px minmax(0,1fr) repeat(4,auto);gap:8px;align-items:center;border-top:1px solid #3a3a3f;padding-top:10px}"
+    ".bootAnimPreview{aspect-ratio:2/1;background:#050506;border:1px solid #3a3a3f;border-radius:6px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:10px}"
+    ".bootAnimPreview canvas{width:100%;height:100%;image-rendering:pixelated}"
     "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}a:visited{color:#84bcf8}"
     "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
     "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
@@ -1738,7 +2025,7 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "#statusMsg.warn{background:#3a2320;border-color:#d4705c;color:#ffb15f}"
     "#statusMsg:empty{display:none}"
     ".configGrid .hint{grid-column:1/-1}"
-    "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}}"
+    "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}.connectTabs{flex-direction:column}.leaderRow{grid-template-columns:32px minmax(0,1fr);gap:4px}.leaderRow .pill{width:max-content}}"
     // Desktop: widen the frame and lay the dashboard cards out in two
     // columns (status | controls, progress 3D | SD manager). The other
     // views stay a comfortable single column, centered.
@@ -1789,7 +2076,7 @@ void handleRootPage() {
 
 <div id='updOverlay' class='updOverlay'><div class='updSpin'></div><h2>Updating firmware</h2><div class='hint'>Do not power off the printer.<br>This page reloads automatically when it is back.</div></div>
 
-<div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
+<div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div id='confirmButtons' class='modalBtns'></div></div></div>
 
 <div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:#eee;font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
 
@@ -1880,27 +2167,47 @@ void handleRootPage() {
   <div id='connectReadyBox' class='hidden'>
     <div class='hint' style='margin-top:0'>Registered as <b id='connectPrinterIdValue'>-</b> &middot; <a href='#' id='connectSettingsButton'>Connect settings</a></div>
     <div id='connectReadyHint' class='hint'>This printer is ready to publish and manage TinyMaker Connect models.</div>
-  </div>
-  <div id='connectPublishBox' class='hidden' style='margin-top:14px'>
-    <h2>Share model</h2>
-    <div class='configGrid'>
-      <label><span>Model name</span><input id='shareModelName' type='text' maxlength='120'></label>
-      <label><span>Original credits</span><input id='shareCredits' type='text' maxlength='255'></label>
+    <div class='connectTabs'>
+      <button id='connectModelsTabButton' type='button' class='active'>Models</button>
+      <button id='connectBootAnimsTabButton' type='button'>Boot animations</button>
+      <button id='connectLeaderboardTabButton' type='button'>Leaderboard</button>
     </div>
-    <canvas id='connectPreviewCanvas' class='hidden' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517;margin-top:10px'></canvas>
-    <div id='shareSteps' class='hint'></div>
-    <div id='shareProgress' class='storageBar hidden'><span id='shareProgressFill'></span></div>
-    <button id='shareUploadButton' class='hidden' type='button'>Upload model</button>
   </div>
-  <div id='connectBrowserBox' class='hidden' style='margin-top:14px'>
-    <h2>Models</h2>
-    <div class='hint'>Shared models can be downloaded from TinyMaker Connect. To publish one of your own models, open SD manager, press Details, then Share model.</div>
-    <div id='connectModelsList' class='files' style='margin-top:10px'></div>
+  <div id='connectModelsPane'>
+    <div id='connectPublishBox' class='hidden' style='margin-top:14px'>
+      <h2>Share model</h2>
+      <div class='configGrid'>
+        <label><span>Model name</span><input id='shareModelName' type='text' maxlength='120'></label>
+        <label><span>Original credits</span><input id='shareCredits' type='text' maxlength='255'></label>
+      </div>
+      <canvas id='connectPreviewCanvas' class='hidden' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517;margin-top:10px'></canvas>
+      <div id='shareSteps' class='hint'></div>
+      <div id='shareProgress' class='storageBar hidden'><span id='shareProgressFill'></span></div>
+      <button id='shareUploadButton' class='hidden' type='button'>Upload model</button>
+    </div>
+    <div id='connectBrowserBox' class='hidden' style='margin-top:14px'>
+      <h2>Models</h2>
+      <div class='hint'>Shared models can be downloaded from TinyMaker Connect. To publish one of your own models, open SD manager, press Details, then Share model.</div>
+      <div id='connectModelsList' class='files' style='margin-top:10px'></div>
+    </div>
+    <div id='connectManagerBox' class='hidden' style='margin-top:14px'>
+      <h2>Manager</h2>
+      <div class='hint'>Models shared by this printer can be hidden, republished, or removed here.</div>
+      <div id='connectMineList' class='files' style='margin-top:10px'></div>
+    </div>
   </div>
-  <div id='connectManagerBox' class='hidden' style='margin-top:14px'>
-    <h2>Manager</h2>
-    <div class='hint'>Models shared by this printer can be hidden, republished, or removed here.</div>
-    <div id='connectMineList' class='files' style='margin-top:10px'></div>
+  <div id='connectBootAnimsPane' class='hidden' style='margin-top:14px'>
+    <h2>Boot animations</h2>
+    <div class='hint'>Install community boot animations to the SD card. The installed animation becomes the active power-on animation.</div>
+    <h2 style='margin-top:14px'>Installed</h2>
+    <div id='connectInstalledBootAnimList' class='files' style='margin-top:10px'></div>
+    <h2 style='margin-top:14px'>Connect library</h2>
+    <div id='connectBootAnimList' class='files' style='margin-top:10px'></div>
+  </div>
+  <div id='connectLeaderboardPane' class='hidden' style='margin-top:14px'>
+    <h2>Leaderboard</h2>
+    <div class='hint'>Shows printers that opted in to public leaderboard stats.</div>
+    <div id='connectLeaderboardList' class='leaderRows' style='margin-top:10px'></div>
   </div>
   <div id='connectSetupBox'>
     <div class='hint'>TinyMaker Connect is not configured on this printer yet.</div>
@@ -2032,7 +2339,7 @@ void handleRootPage() {
 
 <script>
 const $=id=>document.getElementById(id);
-let statusData=null,selectedModel='',sdFreeBytes=0,sdTotalBytes=0,connectConfig=null,shareState=null;
+let statusData=null,selectedModel='',selectedModelConnectPublicId='',sdFreeBytes=0,sdTotalBytes=0,connectConfig=null,shareState=null,connectTab='models';
 const setText=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
 const show=(id,on)=>{const e=$(id);if(e)e.classList.toggle('hidden',!on);};
 const enc=v=>encodeURIComponent(v||'').replace(/'/g,'%27');
@@ -2059,15 +2366,29 @@ const msg=(t,warn)=>{const e=$('statusMsg');e.textContent=t||'';e.classList.togg
     e.style.animation='none';void e.offsetWidth;e.style.animation=''; // restart the slide-in on every message
   }
   clearTimeout(msg._t);if(t&&!warn)msg._t=setTimeout(()=>{if(e.textContent===t)e.textContent='';},5000);};
-// Styled replacement for window.confirm() - returns a Promise<bool>. Matches
-// the dashboard instead of the browser's native (unstyleable) dialog.
+// Styled replacement for window.confirm() - returns a Promise. Matches the
+// dashboard instead of the browser's native (unstyleable) dialog.
 let uiConfirmRes=null;
-const uiConfirm=(message,opts)=>{opts=opts||{};$('confirmText').textContent=message;$('confirmOk').textContent=opts.ok||'OK';$('confirmCancel').textContent=opts.cancel||'Cancel';$('confirmOk').classList.toggle('delete',!!opts.danger);show('confirmModal',true);$('confirmOk').focus();return new Promise(r=>{uiConfirmRes=r;});};
+const uiChoice=(message,choices)=>{
+  $('confirmText').textContent=message;
+  const box=$('confirmButtons');box.innerHTML='';
+  choices.forEach(ch=>{
+    const b=document.createElement('button');
+    b.type='button';b.textContent=ch.label;
+    if(ch.secondary)b.className='button secondary';
+    if(ch.danger)b.classList.add('delete');
+    b.addEventListener('click',()=>uiConfirmClose(ch.value));
+    box.appendChild(b);
+  });
+  show('confirmModal',true);
+  const focus=box.querySelector('button:not(.secondary)')||box.querySelector('button');
+  if(focus)focus.focus();
+  return new Promise(r=>{uiConfirmRes=r;});
+};
+const uiConfirm=(message,opts)=>{opts=opts||{};return uiChoice(message,[{label:opts.cancel||'Cancel',value:false,secondary:true},{label:opts.ok||'OK',value:true,danger:!!opts.danger}]);};
 const uiConfirmClose=v=>{if(!uiConfirmRes)return;show('confirmModal',false);const r=uiConfirmRes;uiConfirmRes=null;r(v);};
-$('confirmOk').addEventListener('click',()=>uiConfirmClose(true));
-$('confirmCancel').addEventListener('click',()=>uiConfirmClose(false));
 $('confirmModal').addEventListener('click',e=>{if(e.target===$('confirmModal'))uiConfirmClose(false);});
-document.addEventListener('keydown',e=>{if(uiConfirmRes){if(e.key==='Escape'){e.preventDefault();uiConfirmClose(false);}else if(e.key==='Enter'){e.preventDefault();uiConfirmClose(document.activeElement!==$('confirmCancel'));}}});
+document.addEventListener('keydown',e=>{if(uiConfirmRes){if(e.key==='Escape'){e.preventDefault();uiConfirmClose(false);}else if(e.key==='Enter'){e.preventDefault();const b=document.activeElement;if(b&&b.tagName==='BUTTON')b.click();}}});
 const bytesNum=v=>Number(v||0)||0;
 const formatBytes=v=>{
   let n=bytesNum(v),u=['B','KB','MB','GB'],i=0;
@@ -2112,13 +2433,72 @@ const uploadWithProgress=(fd,hintEl)=>{
       clearInterval(timer);
       let j={};try{j=JSON.parse(xhr.responseText||'{}');}catch(e){}
       if(xhr.status>=200&&xhr.status<300&&j.ok!==false)resolve(j);
-      else reject(new Error(j.error||('HTTP '+xhr.status)));
+      else {const err=new Error(j.error||('HTTP '+xhr.status));err.status=xhr.status;err.data=j;reject(err);}
     };
     xhr.onerror=()=>{clearInterval(timer);reject(new Error('upload failed'));};
     xhr.onabort=()=>{clearInterval(timer);reject(new Error('upload cancelled'));};
     render();
     xhr.send(fd);
   });
+};
+const uploadSummary=t=>{
+  if(!t)return 'unknown';
+  let p=[];
+  if(t.layers!==undefined)p.push(t.layers+' layers');
+  if(t.heightMm!==undefined)p.push(Number(t.heightMm).toFixed(2)+' mm');
+  if(t.sizeBytes!==undefined)p.push(formatBytes(t.sizeBytes));
+  if(t.estimatedTime)p.push(t.estimatedTime);
+  return p.length?p.join(' - '):'unknown';
+};
+const uploadConflictChoice=async d=>{
+  const text='A model named "'+(d.name||'Model')+'" already exists.\n\nExisting: '+uploadSummary(d.existing)+'\nIncoming: '+uploadSummary(d.incoming)+'\n\nReplace keeps the old model until the new one has unpacked successfully. Rename imports this as a new model.';
+  return uiChoice(text,[{label:'Cancel',value:'cancel',secondary:true},{label:'Rename',value:'rename',secondary:true},{label:'Replace',value:'replace',danger:true}]);
+};
+const modelUploadFd=(blob,filename,action,meta)=>{
+  const fd=new FormData();meta=meta||{};
+  if(action)fd.append('action',action);
+  fd.append('source',meta.source||'dashboard_upload');
+  ['connect_public_id','connect_url','original_credits','license','resin_ml'].forEach(k=>{if(meta[k]!==undefined&&meta[k]!==null&&String(meta[k]).length)fd.append(k,meta[k]);});
+  fd.append('file',blob,filename);
+  return fd;
+};
+const uploadModelPayload=async(blob,filename,hintEl,meta)=>{
+  const send=action=>uploadWithProgress(modelUploadFd(blob,filename,action,meta),hintEl);
+  try{return await send('');}
+  catch(e){
+    if(e.status!==409||!e.data||!e.data.conflict)throw e;
+    const choice=await uploadConflictChoice(e.data);
+    if(choice!=='replace'&&choice!=='rename')throw new Error('Upload cancelled');
+    return await send(choice);
+  }
+};
+const uploadModelPreview=async(name,blob)=>{
+  if(!name||!blob)return false;
+  const fd=new FormData();
+  fd.append('preview',blob,'preview.png');
+  await api('/api/files/model/preview?name='+enc(name),{method:'POST',body:fd},30000);
+  return true;
+};
+const uploadPreviewFromUrl=async(name,url)=>{
+  if(!name||!url)return false;
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok)throw new Error('preview download failed (HTTP '+r.status+')');
+  const blob=await r.blob();
+  const img=new Image();
+  const obj=URL.createObjectURL(blob);
+  try{
+    img.src=obj;
+    await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('preview image failed to load'));});
+    const cv=document.createElement('canvas');
+    cv.width=PREV_W;cv.height=PREV_H;
+    const ctx=cv.getContext('2d');
+    ctx.fillStyle='#151517';ctx.fillRect(0,0,cv.width,cv.height);
+    const scale=Math.min(cv.width/img.naturalWidth,cv.height/img.naturalHeight);
+    const w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.max(1,Math.round(img.naturalHeight*scale));
+    ctx.drawImage(img,Math.round((cv.width-w)/2),Math.round((cv.height-h)/2),w,h);
+    await uploadModelPreview(name,await canvasBlob(cv));
+    return true;
+  }finally{URL.revokeObjectURL(obj);}
 };
 let statusInFlight=false,statusFailCount=0,pendingPrintCmd='',pendingPrintInFlight=false,localPrintStartedAt=0,lpsSynced=false,uploadBusy=false,updLock=false,updSawDown=false,updLockAt=0;
 const showUpdLock=()=>{updLock=true;updSawDown=false;updLockAt=Date.now();$('updOverlay').classList.add('on');};
@@ -2189,6 +2569,7 @@ const deleteBootAnim=async(name,display)=>{
   catch(e){msg(e.message,true);}
 };
 const openView=view=>{
+  if(view!=='connect'||connectTab!=='boot')clearBootAnimPreviews();
   show('homeView',view==='home');
   show('modelPanel',view==='model');
   show('connectView',view==='connect');
@@ -2199,7 +2580,7 @@ const openView=view=>{
   $('configViewButton').classList.toggle('active',view==='config');
   $('updateViewButton').classList.toggle('active',view==='update');
   if(view==='home')loadFiles();
-  if(view==='connect')loadConfig().then(()=>loadConnectModels());
+  if(view==='connect')loadConfig().then(()=>loadConnectTab());
   if(view==='config'){loadConfig();loadBootAnims();}
   if(view==='update')loadUpdate();
 };
@@ -2295,7 +2676,7 @@ const refreshStatus=async()=>{
   }finally{statusInFlight=false;}
 };
 
-let filesItems=[],filesHidden=0,filesPage=0,filesQuery='';
+let filesItems=[],filesHidden=0,filesPage=0,filesQuery='',connectLocalModels={},localBootAnims={},activeBootAnim='';
 const FILES_PER_PAGE=12;
 const renderFiles=()=>{
   const list=$('filesList');
@@ -2325,6 +2706,8 @@ const loadFiles=async()=>{
     const d=await api('/api/files');
     updateSdUsage(d);
     filesItems=d.items;filesHidden=d.hiddenCount||0;
+    connectLocalModels={};
+    filesItems.forEach(it=>{if(it.type==='model'&&it.connectPublicId)connectLocalModels[it.connectPublicId]=it.name;});
     show('filesFilter',filesItems.length>FILES_PER_PAGE);
     renderFiles();
   }catch(e){updateSdUsage(null);list.innerHTML='<div class="hint warn">'+e.message+'</div>';}
@@ -2333,8 +2716,10 @@ const loadFiles=async()=>{
 const modelDetails=async(nameEnc,estimate)=>{
   const name=decodeURIComponent(nameEnc); selectedModel=name; openView('model');
   if(!estimate){
+    selectedModelConnectPublicId='';
     setText('modelTitle',name); setText('modelLayers','Loading'); setText('modelHeight','-'); setText('modelTime','-');
     show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
+    show('modelMlButton',true); show('modelPreviewButton',true);
     show('modelShareButton',connectIsReady());
   } else {
     $('modelMlButton').disabled=true;
@@ -2343,8 +2728,12 @@ const modelDetails=async(nameEnc,estimate)=>{
   }
   try{
     const d=await api('/api/files/model?name='+enc(name)+(estimate?'&estimate=1':''));
+    selectedModelConnectPublicId=d.connectPublicId||'';
     setText('modelTitle',d.name); setText('modelLayers',d.layers); setText('modelHeight',Number(d.heightMm).toFixed(2)+' mm'); setText('modelTime',d.estimatedTime);
     show('modelResinBox',!!d.resinEstimated); if(d.resinEstimated)setText('modelResin',Number(d.resinMl).toFixed(1)+' ml');
+    show('modelMlButton',!d.resinEstimated);
+    show('modelShareButton',connectIsReady()&&!selectedModelConnectPublicId);
+    if(d.preview&&!estimate){show('modelPreviewButton',false);await loadSavedPreview(name);}
   }catch(e){msg(e.message,true);}
   finally{$('modelMlButton').disabled=false;$('modelMlButton').textContent='Calculate ml';show('modelProgress',false);}
 };
@@ -2357,6 +2746,15 @@ const PREV_W=720,PREV_H=420,PREV_S=4.6,PREV_CX=360,PREV_CY=272;
 const isoPt=(x,y,z)=>({X:PREV_CX+(x-y)*0.866*PREV_S,Y:PREV_CY+(x+y)*0.35*PREV_S-z*0.8*PREV_S});
 let slicesCache={name:'',slices:[],gw:80,gh:60,modelH:0,layers:0};
 let lastPrevFrac=-1;
+const loadSavedPreview=async name=>{
+  const cv=$('modelPreviewCanvas'),ctx=cv.getContext('2d'),img=new Image();
+  img.src='/api/files/model/preview?name='+enc(name)+'&r='+Date.now();
+  await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('saved preview failed to load'));});
+  cv.width=PREV_W;cv.height=PREV_H;
+  ctx.clearRect(0,0,PREV_W,PREV_H);
+  ctx.drawImage(img,0,0,PREV_W,PREV_H);
+  show('previewWrap',true);
+};
 const drawIso=(cv,doneFrac)=>{
   const {slices,gw,gh,modelH}=slicesCache;
   cv.width=PREV_W;cv.height=PREV_H;
@@ -2439,6 +2837,8 @@ const modelPreview=async()=>{
     if(slicesCache.name!==selectedModel||!slicesCache.slices.length)
       await fetchSlices(selectedModel,layers,modelH,btn);
     drawIso($('modelPreviewCanvas'),1);
+    const blob=await canvasBlob($('modelPreviewCanvas'));
+    await uploadModelPreview(selectedModel,blob);
   }catch(e){msg(e.message,true);show('previewWrap',false);}
   btn.disabled=false;btn.textContent='Preview 3D';
 };
@@ -2465,6 +2865,8 @@ const connectModelHtml=(m,mine)=>{
   const preview=m.preview_url?connectBase()+m.preview_url:'';
   const resin=(m.resin_ml===null||m.resin_ml===undefined)?'-':Number(m.resin_ml).toFixed(2)+' ml';
   const rating=m.rating_count>0?(Number(m.rating_average||0).toFixed(1)+'/5'):'No ratings';
+  const localName=connectLocalModels[m.public_id||'']||'';
+  const actionDisabled=(statusData&&statusData.busy)||(statusData&&statusData.webControl===false);
   let h='<div class="connectTile">';
   h+='<a href="'+esc(detail)+'" target="_blank" rel="noopener">';
   h+='<div class="connectPreview">'+(preview?'<img src="'+esc(preview)+'" alt="">':'<span class="meta">No preview</span>')+'</div>';
@@ -2479,9 +2881,11 @@ const connectModelHtml=(m,mine)=>{
   h+='<span class="pill">'+esc(rating)+'</span>';
   if(m.bookmark_count)h+='<span class="pill">'+esc(m.bookmark_count)+' bookmarks</span>';
   if(mine&&m.status)h+='<span class="pill">'+esc(m.status)+'</span>';
+  if(localName)h+='<span class="pill">On SD</span>';
   h+='</div></a>';
   h+='<div class="connectActions">';
-  h+='<button class="small secondaryBtn" onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\')">Import</button>';
+  if(localName)h+='<button class="small"'+(actionDisabled?' disabled':'')+' onclick="startPrint(\''+enc(localName)+'\')">Print</button>';
+  else h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\',\''+enc(m.original_credits||'')+'\',\''+enc(m.license||'')+'\',\''+enc(m.preview_url||'')+'\',\''+enc(m.resin_ml===null||m.resin_ml===undefined?'':m.resin_ml)+'\')">Import</button>';
   if(mine){
     // enc(), not esc(): the HTML parser decodes entities inside onclick before
     // the JS runs, so an HTML-escaped quote in server data would still break
@@ -2494,10 +2898,12 @@ const connectModelHtml=(m,mine)=>{
   h+='</div></div>';
   return h;
 };
-const loadConnectModels=async()=>{
+const loadConnectModels=async(refreshLocal)=>{
   if(!connectIsReady())return;
+  refreshLocal=refreshLocal!==false;
   $('connectModelsList').innerHTML='<div class="hint">Loading models...</div>';
   $('connectMineList').innerHTML='<div class="hint">Loading your shared models...</div>';
+  if(refreshLocal)try{await loadFiles();}catch(e){}
   try{
     const all=await connectFetchJson('/api/models');
     const items=all.items||[];
@@ -2509,6 +2915,166 @@ const loadConnectModels=async()=>{
     $('connectMineList').innerHTML=items.length?'<div class="connectTiles">'+items.map(m=>connectModelHtml(m,true)).join('')+'</div>':'<div class="hint">This printer has not shared models yet.</div>';
   }catch(e){$('connectMineList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
 };
+const bootAnimIntervals=[];
+const clearBootAnimPreviews=()=>{while(bootAnimIntervals.length)clearInterval(bootAnimIntervals.pop());};
+const rgb565=(lo,hi)=>{
+  const v=lo|(hi<<8),r=((v>>11)&31)*255/31,g=((v>>5)&63)*255/63,b=(v&31)*255/31;
+  return [r|0,g|0,b|0,255];
+};
+const renderTmbCanvas=async(cv,url)=>{
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const buf=await r.arrayBuffer(),u=new Uint8Array(buf);
+  if(u.length<12||u[0]!==84||u[1]!==77||u[2]!==66||u[3]!==49)throw new Error('invalid TMB1');
+  const w=u[4]|(u[5]<<8),h=u[6]|(u[7]<<8),frames=u[8]|(u[9]<<8),fps=u[10]|(u[11]<<8);
+  const frameBytes=w*h*2,total=Math.min(frames,Math.floor((u.length-12)/frameBytes),120);
+  if(!w||!h||w>160||h>80||!total)throw new Error('invalid TMB size');
+  cv.width=w;cv.height=h;
+  const ctx=cv.getContext('2d'),img=ctx.createImageData(w,h);
+  const draw=i=>{
+    let p=12+i*frameBytes;
+    for(let px=0;px<w*h;px++){
+      const c=rgb565(u[p],u[p+1]),o=px*4;p+=2;
+      img.data[o]=c[0];img.data[o+1]=c[1];img.data[o+2]=c[2];img.data[o+3]=255;
+    }
+    ctx.putImageData(img,0,0);
+  };
+  draw(0);
+  if(total>1){
+    let i=0,delay=Math.max(40,Math.min(300,fps?Math.round(1000/fps):80));
+    bootAnimIntervals.push(setInterval(()=>{i=(i+1)%total;draw(i);},delay));
+  }
+};
+const renderBootAnimPreviews=root=>{
+  root.querySelectorAll('canvas[data-tmb-url]').forEach(cv=>{
+    renderTmbCanvas(cv,cv.dataset.tmbUrl).catch(()=>{const p=cv.parentElement;if(p)p.innerHTML='<span class="meta">Preview unavailable</span>';});
+  });
+};
+const loadLocalBootAnimations=async()=>{
+  const d=await api('/api/boot-anim');
+  activeBootAnim=d.selected||'';
+  localBootAnims={};
+  (d.animations||[]).forEach(a=>{localBootAnims[a.name]=a;});
+  return d;
+};
+const connectInstalledBootAnimHtml=(a,isDefault)=>{
+  const active=isDefault?!activeBootAnim:activeBootAnim===a.name;
+  const actionDisabled=(statusData&&statusData.busy)||(statusData&&statusData.webControl===false);
+  let h='<div class="connectTile">';
+  if(isDefault)h+='<div class="bootAnimPreview"><span class="meta">Built-in TinyMaker boot screen</span></div>';
+  else h+='<div class="bootAnimPreview"><canvas data-tmb-url="/api/boot-anim/file?name='+enc(a.name)+'"></canvas></div>';
+  h+='<h2>'+esc(isDefault?'Default':(a.animationName||a.display))+'</h2><div class="pills">';
+  if(active)h+='<span class="pill">Active</span>';
+  if(!isDefault)h+='<span class="pill">'+formatBytes(a.sizeBytes||0)+'</span>';
+  if(a.version)h+='<span class="pill">v'+esc(a.version)+'</span>';
+  if(a.connectPublicId)h+='<span class="pill">Connect</span>';
+  h+='</div><div class="connectActions">';
+  if(!active)h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectActivateBootAnim(\''+enc(isDefault?'':a.name)+'\')">Activate</button>';
+  h+='</div></div>';
+  return h;
+};
+const renderInstalledBootAnimations=d=>{
+  const items=d.animations||[];
+  $('connectInstalledBootAnimList').innerHTML='<div class="connectTiles">'+[connectInstalledBootAnimHtml({},true)].concat(items.map(a=>connectInstalledBootAnimHtml(a,false))).join('')+'</div>';
+  renderBootAnimPreviews($('connectInstalledBootAnimList'));
+};
+const connectBootAnimHtml=a=>{
+  const actionDisabled=(statusData&&statusData.busy)||(statusData&&statusData.webControl===false)||(statusData&&statusData.sdReady===false);
+  const local=localBootAnims[a.install_name||''];
+  const active=local&&activeBootAnim===local.name;
+  const updateAvailable=!!(local&&((a.version&&local.version&&a.version!==local.version)||(a.checksum_sha256&&local.checksumSha256&&a.checksum_sha256!==local.checksumSha256)));
+  const previewUrl=a.preview_url||a.download_url||'';
+  const url=previewUrl?(previewUrl.indexOf('http')===0?previewUrl:connectBase()+previewUrl):'';
+  let h='<div class="connectTile">';
+  h+='<div class="bootAnimPreview">'+(url?'<canvas data-tmb-url="'+esc(url)+'"></canvas>':'<span class="meta">No preview</span>')+'</div>';
+  h+='<h2>'+esc(a.animation_name||'Boot animation')+'</h2>';
+  h+='<div class="meta">'+esc(a.description||a.original_credits||'')+'</div>';
+  h+='<div class="pills">';
+  if(a.original_credits)h+='<span class="pill">'+esc(a.original_credits)+'</span>';
+  if(a.license)h+='<span class="pill">'+esc(a.license)+'</span>';
+  if(a.version)h+='<span class="pill">v'+esc(a.version)+'</span>';
+  h+='<span class="pill">'+formatBytes(a.file_size||0)+'</span>';
+  h+='<span class="pill">'+esc(a.download_count||0)+' installs</span>';
+  if(local)h+='<span class="pill">Installed</span>';
+  if(active)h+='<span class="pill">Active</span>';
+  if(updateAvailable)h+='<span class="pill">Update available</span>';
+  h+='</div><div class="connectActions">';
+  if(local&&!active)h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectActivateBootAnim(\''+enc(local.name)+'\')">Activate</button>';
+  h+='<button class="small'+(local&&!updateAvailable?' secondaryBtn':'')+'"'+(actionDisabled?' disabled':'')+' onclick="connectInstallBootAnim(\''+enc(a.download_url||'')+'\',\''+enc(a.install_name||a.animation_name||'downloaded')+'\',\''+enc(a.public_id||'')+'\',\''+enc(a.animation_name||'')+'\',\''+enc(a.version||'')+'\',\''+enc(a.checksum_sha256||'')+'\',\''+enc(a.original_credits||'')+'\',\''+enc(a.license||'')+'\')">'+(updateAvailable?'Update':(local?'Reinstall':'Install'))+'</button>';
+  h+='</div></div>';
+  return h;
+};
+const loadConnectBootAnimations=async()=>{
+  if(!connectIsReady())return;
+  clearBootAnimPreviews();
+  $('connectInstalledBootAnimList').innerHTML='<div class="hint">Loading installed boot animations...</div>';
+  $('connectBootAnimList').innerHTML='<div class="hint">Loading boot animations...</div>';
+  try{renderInstalledBootAnimations(await loadLocalBootAnimations());}
+  catch(e){$('connectInstalledBootAnimList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
+  try{
+    const all=await connectFetchJson('/api/boot-animations');
+    const items=all.items||[];
+    $('connectBootAnimList').innerHTML=items.length?'<div class="connectTiles">'+items.map(connectBootAnimHtml).join('')+'</div>':'<div class="hint">No boot animations published yet.</div>';
+    renderBootAnimPreviews($('connectBootAnimList'));
+  }catch(e){$('connectBootAnimList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
+};
+const connectInstallBootAnim=async(downloadUrl,installName,publicId,animationName,version,checksum,credits,licenseName)=>{
+  downloadUrl=decodeURIComponent(downloadUrl||'');installName=decodeURIComponent(installName||'downloaded');
+  publicId=decodeURIComponent(publicId||'');animationName=decodeURIComponent(animationName||'');version=decodeURIComponent(version||'');checksum=decodeURIComponent(checksum||'');credits=decodeURIComponent(credits||'');licenseName=decodeURIComponent(licenseName||'');
+  if(statusData&&statusData.busy){msg('Printer is busy. Install when idle.',true);return;}
+  if(statusData&&statusData.sdReady===false){msg('Insert an SD card before installing boot animations.',true);return;}
+  if(!downloadUrl){msg('Animation download URL missing.',true);return;}
+  if(!await uiConfirm('Install this boot animation on the printer?'))return;
+  let url=downloadUrl.indexOf('http')===0?downloadUrl:connectBase()+downloadUrl;
+  url+=(url.indexOf('?')>=0?'&':'?')+'publish_token='+enc(connectConfig.connectPublishToken);
+  const fd=new URLSearchParams();fd.append('url',url);fd.append('name',installName);
+  if(publicId){fd.append('public_id',publicId);fd.append('connect_url',connectBase()+'/api/boot-animations/'+enc(publicId)+'/download');}
+  if(animationName)fd.append('animation_name',animationName);
+  if(version)fd.append('version',version);
+  if(checksum)fd.append('checksum_sha256',checksum);
+  if(credits)fd.append('original_credits',credits);
+  if(licenseName)fd.append('license',licenseName);
+  try{msg('Installing boot animation...');await api('/api/boot-anim/install',{method:'POST',body:fd},30000);msg('Boot animation installed.');loadBootAnims();loadConnectBootAnimations();}
+  catch(e){msg(e.message,true);}
+};
+window.connectInstallBootAnim=connectInstallBootAnim;
+const connectActivateBootAnim=async nameEnc=>{
+  const name=decodeURIComponent(nameEnc||'');
+  if(statusData&&statusData.busy){msg('Printer is busy. Change boot animation when idle.',true);return;}
+  try{await api('/api/boot-anim/select',{method:'POST',body:new URLSearchParams({name})});
+    msg(name?'Boot animation activated. Reboot to see it.':'Default boot animation activated.');loadBootAnims();loadConnectBootAnimations();}
+  catch(e){msg(e.message,true);}
+};
+window.connectActivateBootAnim=connectActivateBootAnim;
+const loadConnectLeaderboard=async()=>{
+  if(!connectIsReady())return;
+  $('connectLeaderboardList').innerHTML='<div class="hint">Loading leaderboard...</div>';
+  try{
+    const all=await connectFetchJson('/api/leaderboard');
+    const items=all.items||[];
+    $('connectLeaderboardList').innerHTML=items.length?items.map((r,i)=>
+      '<div class="leaderRow"><div class="value">#'+(i+1)+'</div><div><div class="value">'+esc(r.printer_name||r.public_id||'TinyMaker')+'</div><div class="meta">'+esc(r.public_id||'')+'</div></div>'+
+      '<span class="pill">'+esc(r.uploads||0)+' uploads</span><span class="pill">'+esc(r.downloads||0)+' downloads</span><span class="pill">'+esc(r.ratings||0)+' ratings</span><span class="pill">'+esc(r.bookmarks||0)+' bookmarks</span></div>'
+    ).join(''):'<div class="hint">No printers opted in yet.</div>';
+  }catch(e){$('connectLeaderboardList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
+};
+const loadConnectTab=async()=>{
+  if(!connectIsReady())return;
+  if(connectTab==='boot')return loadConnectBootAnimations();
+  if(connectTab==='leaderboard')return loadConnectLeaderboard();
+  return loadConnectModels();
+};
+const setConnectTab=tab=>{
+  if(tab!=='boot')clearBootAnimPreviews();
+  connectTab=tab;
+  show('connectModelsPane',tab==='models');
+  show('connectBootAnimsPane',tab==='boot');
+  show('connectLeaderboardPane',tab==='leaderboard');
+  $('connectModelsTabButton').classList.toggle('active',tab==='models');
+  $('connectBootAnimsTabButton').classList.toggle('active',tab==='boot');
+  $('connectLeaderboardTabButton').classList.toggle('active',tab==='leaderboard');
+  loadConnectTab();
+};
 const connectModelAction=async(id,action)=>{
   id=decodeURIComponent(id);
   if(action==='removed'&&!await uiConfirm('Remove this shared model from TinyMaker Connect?',{danger:true}))return;
@@ -2517,8 +3083,9 @@ const connectModelAction=async(id,action)=>{
   try{await connectPostForm('/api/models/'+enc(id),fd,null);loadConnectModels();}catch(e){msg(e.message,true);}
 };
 window.connectModelAction=connectModelAction;
-const connectImportModel=async(id,name,downloadUrl)=>{
+const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUrl,resinMl)=>{
   id=decodeURIComponent(id);name=decodeURIComponent(name);downloadUrl=decodeURIComponent(downloadUrl);
+  credits=decodeURIComponent(credits||'');licenseName=decodeURIComponent(licenseName||'');previewUrl=decodeURIComponent(previewUrl||'');resinMl=decodeURIComponent(resinMl||'');
   if(statusData&&statusData.busy){msg('Printer is busy. Import when idle.',true);return;}
   if(statusData&&statusData.sdReady===false){msg('Insert an SD card before importing models.',true);return;}
   if(!await uiConfirm('Import '+name+' to the printer SD card?'))return;
@@ -2529,14 +3096,23 @@ const connectImportModel=async(id,name,downloadUrl)=>{
     if(!r.ok)throw new Error('download failed (HTTP '+r.status+')');
     const blob=await r.blob();
     if(!checkUploadFits(blob.size,$('statusMsg')))return;
-    const fd=new FormData();
-    fd.append('file',blob,name.replace(/[^A-Za-z0-9_.-]/g,'_')+'.zip');
     uploadBusy=true;
     msg('Importing '+name+' to SD...');
-    await uploadWithProgress(fd,$('statusMsg'));
-    msg('Imported '+name+' to SD.');
+    const safeName=name.replace(/[^A-Za-z0-9_.-]/g,'_')+'.zip';
+    const meta={source:'connect',connect_public_id:id,connect_url:connectBase()+'/model/'+enc(id),original_credits:credits,license:licenseName};
+    if(resinMl)meta.resin_ml=resinMl;
+    const done=await uploadModelPayload(blob,safeName,$('statusMsg'),meta);
+    const finalName=done&&done.name?done.name:name;
+    let previewError='';
+    if(previewUrl){
+      const previewFull=previewUrl.indexOf('http')===0?previewUrl:connectBase()+previewUrl;
+      try{await uploadPreviewFromUrl(finalName,previewFull);}catch(e){previewError=e.message;}
+    }
+    msg(previewError?('Imported '+finalName+' to SD, but preview was not saved: '+previewError):('Imported '+finalName+' to SD.'),!!previewError);
     uploadBusy=false;
-    refreshStatus();loadFiles();loadConnectModels();
+    connectLocalModels[id]=finalName;
+    loadConnectModels(false);
+    refreshStatus();await loadFiles();loadConnectModels(false);
   }catch(e){uploadBusy=false;msg(e.message,true);}
 };
 window.connectImportModel=connectImportModel;
@@ -2581,6 +3157,7 @@ const shareSet=(text,pct)=>{
 };
 const shareModel=async name=>{
   if(!connectIsReady()){msg('Configure TinyMaker Connect first.',true);openView('connect');return;}
+  setConnectTab('models');
   openView('connect');show('connectPublishBox',true);$('shareUploadButton').classList.add('hidden');$('shareUploadButton').disabled=true;
   $('shareModelName').value=name;$('shareCredits').value='';
   shareState={sdName:name,details:null,archive:null,preview:null};
@@ -2593,6 +3170,7 @@ const shareModel=async name=>{
     if(slicesCache.name!==name||!slicesCache.slices.length)await fetchSlices(name,d.layers,modelH,null);
     show('connectPreviewCanvas',true);drawIso($('connectPreviewCanvas'),1);
     shareState.preview=await canvasBlob($('connectPreviewCanvas'));
+    await uploadModelPreview(name,shareState.preview);
     shareSet('3. Preparing model for upload...',35);
     shareState.archive=await zipModelLayers(name,d.layers,(i,n)=>shareSet('3. Preparing model for upload... '+i+' / '+n,35+Math.round(55*i/n)));
     shareSet('4. Done. Review the details, then upload.',100);
@@ -2612,8 +3190,17 @@ const uploadSharedModel=async()=>{
   $('shareUploadButton').disabled=true;
   try{
     shareSet('6. Uploading...',0);
-    await connectPostForm('/api/models',fd,(l,t)=>shareSet('6. Uploading... '+Math.round(100*l/t)+'%',Math.round(100*l/t)));
-    shareSet('7. Model uploaded.',100);loadConnectModels();
+    const res=await connectPostForm('/api/models',fd,(l,t)=>shareSet('6. Uploading... '+Math.round(100*l/t)+'%',Math.round(100*l/t)));
+    const m=res.model||{};
+    const meta=new URLSearchParams();
+    meta.append('name',shareState.sdName);
+    meta.append('shared_model_name',modelName);
+    meta.append('original_credits',$('shareCredits').value.trim());
+    if(m.public_id){meta.append('connect_public_id',m.public_id);meta.append('connect_url',connectBase()+'/model/'+enc(m.public_id));selectedModelConnectPublicId=m.public_id;show('modelShareButton',false);}
+    if(m.license)meta.append('license',m.license);
+    if(d.resinEstimated)meta.append('resin_ml',d.resinMl);
+    await api('/api/files/model/metadata',{method:'POST',body:meta});
+    shareSet('7. Model uploaded and metadata saved.',100);loadConnectModels();
   }catch(e){shareSet(e.message,null);msg(e.message,true);$('shareUploadButton').disabled=false;}
 };
 window.shareModel=name=>shareModel(decodeURIComponent(name));
@@ -2693,6 +3280,9 @@ const updateConnectView=c=>{
   const id=c.connectPrinterPublicId||'';
   const registered=!!id;
   show('connectReadyBox',registered);
+  show('connectModelsPane',registered&&connectTab==='models');
+  show('connectBootAnimsPane',registered&&connectTab==='boot');
+  show('connectLeaderboardPane',registered&&connectTab==='leaderboard');
   show('connectBrowserBox',registered);
   show('connectManagerBox',registered);
   show('connectSetupBox',!registered);
@@ -2703,7 +3293,7 @@ const updateConnectView=c=>{
     $('connectSetupHint').textContent=c.connectLastStatus?('Last status: '+c.connectLastStatus):'Setup uses the default TinyMaker Connect server. You can change the server URL before registering.';
   }
   $('connectSetupButton').disabled=!!(statusData&&statusData.busy)||!!(statusData&&statusData.webControl===false);
-  show('modelShareButton',connectIsReady()&&!!selectedModel);
+  show('modelShareButton',connectIsReady()&&!!selectedModel&&!selectedModelConnectPublicId);
 };
 const loadConfig=async()=>{
   try{
@@ -2743,7 +3333,7 @@ window.deleteFile=deleteFile;
 window.filesNav=d=>{filesPage+=d;renderFiles();};
 $('filesFilter').addEventListener('input',e=>{filesQuery=e.target.value.trim();filesPage=0;renderFiles();});
 
-$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;const fd=new FormData();fd.append('file',f);uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{await uploadWithProgress(fd,$('uploadHint'));$('uploadFile').value='';$('uploadButton').classList.add('secondary');$('uploadHint').textContent='Upload complete in '+formatShortTime(Date.now()-started)+'.';loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
+$('uploadForm').addEventListener('submit',async e=>{e.preventDefault();const f=$('uploadFile').files[0];if(!f)return;if(!checkUploadFits(f.size,$('uploadHint')))return;uploadBusy=true;$('uploadButton').disabled=true;$('uploadHint').textContent='Uploading...';const started=Date.now();try{const r=await uploadModelPayload(f,f.name,$('uploadHint'),{source:'dashboard_upload'});$('uploadFile').value='';$('uploadButton').classList.add('secondary');$('uploadHint').textContent=(r&&r.renamed?'Imported as '+r.name+'. ':'Upload complete in '+formatShortTime(Date.now()-started)+'.');loadFiles();}catch(err){$('uploadHint').textContent=err.message;}finally{uploadBusy=false;$('uploadButton').disabled=false;}});
 $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/config',{method:'POST',body:new FormData(e.target)});msg('Config saved.');loadConfig();}catch(err){msg(err.message,true);}});
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!await uiConfirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?',{danger:true}))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset MQTT settings?',{danger:true}))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
@@ -2771,6 +3361,9 @@ $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
 $('updateViewButton').addEventListener('click',()=>openView('update'));
+$('connectModelsTabButton').addEventListener('click',()=>setConnectTab('models'));
+$('connectBootAnimsTabButton').addEventListener('click',()=>setConnectTab('boot'));
+$('connectLeaderboardTabButton').addEventListener('click',()=>setConnectTab('leaderboard'));
 $('modelBackButton').addEventListener('click',()=>openView('home'));
 $('connectSetupButton').addEventListener('click',async()=>{
   openView('config');
@@ -3060,6 +3653,71 @@ void drawWifiBadge() {
 // stores it in the /bootanim library, then makes it the active boot animation.
 // CORS header so the cross-origin "Send to printer" page can read our reply.
 //   POST /api/boot-anim/install   body: url=<http/https .tmb url>&name=<slug>
+String bootAnimMetadataPath(const String &name) {
+  return String(BOOTANIM_DIR) + "/" + name + ".json";
+}
+
+bool readBootAnimMetadataJson(const String &name, String &json) {
+  File f = SD.open(bootAnimMetadataPath(name).c_str());
+  if (!f) return false;
+  json = "";
+  while (f.available() && json.length() < 2048) json += (char)f.read();
+  f.close();
+  return json.length() > 0 && json.length() < 2048;
+}
+
+void appendBootAnimMetadataString(String &out, const String &json, const char *jsonKey, const char *apiKey) {
+  String v;
+  if (!readJsonStringField(json, jsonKey, v)) return;
+  out += ",\"";
+  out += apiKey;
+  out += "\":\"";
+  out += jsonEscape(v);
+  out += "\"";
+}
+
+void appendBootAnimMetadataFields(String &out, const String &name) {
+  String json;
+  if (!readBootAnimMetadataJson(name, json)) return;
+  appendBootAnimMetadataString(out, json, "source", "source");
+  appendBootAnimMetadataString(out, json, "connect_public_id", "connectPublicId");
+  appendBootAnimMetadataString(out, json, "connect_url", "connectUrl");
+  appendBootAnimMetadataString(out, json, "animation_name", "animationName");
+  appendBootAnimMetadataString(out, json, "version", "version");
+  appendBootAnimMetadataString(out, json, "checksum_sha256", "checksumSha256");
+  appendBootAnimMetadataString(out, json, "original_credits", "originalCredits");
+  appendBootAnimMetadataString(out, json, "license", "license");
+}
+
+bool writeBootAnimMetadataFile(const String &slug) {
+  String publicId = formString("public_id", "", 32);
+  String connectUrl = formString("connect_url", "", 160);
+  String version = formString("version", "", 32);
+  String checksum = formString("checksum_sha256", "", 80);
+  String animationName = formString("animation_name", "", 120);
+  String credits = formString("original_credits", "", 160);
+  String licenseName = formString("license", "", 32);
+  SD.remove(bootAnimMetadataPath(slug).c_str());
+  if (!publicId.length() && !connectUrl.length() && !version.length() && !checksum.length() &&
+      !animationName.length() && !credits.length() && !licenseName.length()) return true;
+
+  File f = SD.open(bootAnimMetadataPath(slug).c_str(), FILE_WRITE);
+  if (!f) return false;
+  f.print("{\n  \"format_version\": 1,\n  \"source\": \"connect\",\n  \"install_name\": \"");
+  f.print(jsonEscape(slug));
+  f.print("\"");
+  if (publicId.length()) { f.print(",\n  \"connect_public_id\": \""); f.print(jsonEscape(publicId)); f.print("\""); }
+  if (connectUrl.length()) { f.print(",\n  \"connect_url\": \""); f.print(jsonEscape(connectUrl)); f.print("\""); }
+  if (animationName.length()) { f.print(",\n  \"animation_name\": \""); f.print(jsonEscape(animationName)); f.print("\""); }
+  if (version.length()) { f.print(",\n  \"version\": \""); f.print(jsonEscape(version)); f.print("\""); }
+  if (checksum.length()) { f.print(",\n  \"checksum_sha256\": \""); f.print(jsonEscape(checksum)); f.print("\""); }
+  if (credits.length()) { f.print(",\n  \"original_credits\": \""); f.print(jsonEscape(credits)); f.print("\""); }
+  if (licenseName.length()) { f.print(",\n  \"license\": \""); f.print(jsonEscape(licenseName)); f.print("\""); }
+  f.print("\n}\n");
+  f.close();
+  return true;
+}
+
 void handleApiBootAnimInstall() {
   server.sendHeader("Access-Control-Allow-Origin", "*");
 
@@ -3172,6 +3830,7 @@ void handleApiBootAnimInstall() {
   }
 
   bootAnimName = slug;          // installed animation becomes the active one
+  writeBootAnimMetadataFile(slug);
   saveDeviceConfig();
   sendApiOk("\"bytes\":" + String((unsigned long)total) + ",\"name\":\"" + jsonEscape(slug) + "\"");
   netMessage("Boot animation:", bootAnimDisplay(slug).c_str());
@@ -3193,10 +3852,34 @@ void handleApiBootAnimList() {
     long sz = f ? (long)f.size() : 0;
     if (f) f.close();
     out += "{\"name\":\"" + jsonEscape(names[i]) + "\",\"display\":\"" +
-           jsonEscape(bootAnimDisplay(names[i])) + "\",\"sizeBytes\":" + String(sz) + "}";
+           jsonEscape(bootAnimDisplay(names[i])) + "\",\"sizeBytes\":" + String(sz);
+    appendBootAnimMetadataFields(out, names[i]);
+    out += "}";
   }
   out += "]}";
   server.send(200, "application/json", out);
+}
+
+// GET /api/boot-anim/file?name=<slug> - stream an installed TMB1 animation for
+// browser preview. Read-only, but still blocked while printing because SD is busy.
+void handleApiBootAnimFile() {
+  if (printerBusy())  { sendApiError(409, "printer busy"); return; }
+  if (!sdCardReady()) { sendApiError(503, "sd card unavailable"); return; }
+  String name = sanitizeAnimName(server.arg("name"));
+  if (name.length() == 0 || !bootAnimExists(name)) { sendApiError(404, "animation not found"); return; }
+
+  String path = String(BOOTANIM_DIR) + "/" + name + ".tmb";
+  File f = SD.open(path.c_str());
+  if (!f) { sendApiError(404, "animation not found"); return; }
+
+  server.sendHeader("Cache-Control", "max-age=86400");
+  server.setContentLength(f.size());
+  server.send(200, "application/octet-stream", "");
+  uint8_t buf[512];
+  int n;
+  WiFiClient client = server.client();
+  while ((n = f.read(buf, sizeof(buf))) > 0) client.write(buf, n);
+  f.close();
 }
 
 // POST /api/boot-anim/select  body: name=<slug|empty>  ("" = built-in Default)
@@ -3221,6 +3904,7 @@ void handleApiBootAnimDelete() {
   if (name.length() == 0 || !bootAnimExists(name)) { sendApiError(404, "animation not found"); return; }
   String path = String(BOOTANIM_DIR) + "/" + name + ".tmb";
   SD.remove(path.c_str());
+  SD.remove(bootAnimMetadataPath(name).c_str());
   if (bootAnimName == name) { bootAnimName = ""; saveDeviceConfig(); }  // fall back to Default
   sendApiOk("");
 }
@@ -3314,6 +3998,9 @@ void network_setup() {
   server.on("/api/status", HTTP_GET, handleApiStatus);
   server.on("/api/files", HTTP_GET, handleApiFiles);
   server.on("/api/files/model", HTTP_GET, handleApiFileModel);
+  server.on("/api/files/model/metadata", HTTP_POST, handleApiFileModelMetadata);
+  server.on("/api/files/model/preview", HTTP_GET, handleApiFileModelPreview);
+  server.on("/api/files/model/preview", HTTP_POST, finishPreviewUpload, handlePreviewUploadData);
   server.on("/api/files/layer", HTTP_GET, handleApiFileLayer);
   server.on("/api/files/delete", HTTP_POST, handleApiFileDelete);
   server.on("/api/config", HTTP_GET, handleApiConfigGet);
@@ -3337,6 +4024,7 @@ void network_setup() {
   server.on("/api/print/resume", HTTP_POST, handleApiPrintResume);
   server.on("/api/print/stop", HTTP_POST, handleApiPrintStop);
   server.on("/api/boot-anim", HTTP_GET, handleApiBootAnimList);
+  server.on("/api/boot-anim/file", HTTP_GET, handleApiBootAnimFile);
   server.on("/api/boot-anim/select", HTTP_POST, handleApiBootAnimSelect);
   server.on("/api/boot-anim/delete", HTTP_POST, handleApiBootAnimDelete);
   server.on("/api/boot-anim/install", HTTP_POST, handleApiBootAnimInstall);
