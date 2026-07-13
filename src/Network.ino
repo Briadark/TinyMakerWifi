@@ -280,6 +280,8 @@ void finishUpload() {
     out += jsonEscape(result.finalName);
     out += "\",\"renamed\":";
     out += result.renamed ? "true" : "false";
+    out += ",\"sourceLayers\":";
+    out += String(result.summary.sourceLayers);
     out += ",\"layers\":";
     out += String(result.summary.printLayers);
     out += ",\"heightMm\":";
@@ -648,27 +650,17 @@ int countModelSourceLayers(const String &name) {
   return count;
 }
 
-bool modelStats(const String &name, int &printLayers, float &heightMm, uint32_t &timeSecs) {
+bool modelSummaryForModel(const String &name, ModelSummary &summary) {
   int sourceLayers = countModelSourceLayers(name);
-  if (sourceLayers <= 0 || sourceLayers > MAX_LAYER_FILES) return false;
+  return modelSummaryFromSourceLayers(sourceLayers, summary);
+}
 
-  get_motor_updown_time();
-  printLayers = sourceLayers;
-  if (Layer_Height < 0.09) {
-    heightMm = sourceLayers * 0.05;
-  }
-  if (Layer_Height > 0.06) {
-    printLayers = sourceLayers / 2;
-    heightMm = 0.1 * printLayers;
-  }
-
-  long exposureLayers = printLayers - Base_Layer;
-  if (exposureLayers < 0) exposureLayers = 0;
-  long movementLayers = printLayers - 1;
-  if (movementLayers < 0) movementLayers = 0;
-  timeSecs = (Base_Layer * Base_Exposure) +
-             (exposureLayers * Regular_Exposure) +
-             (uint32_t)(motor_updown_time * movementLayers);
+bool modelStats(const String &name, int &printLayers, float &heightMm, uint32_t &timeSecs) {
+  ModelSummary summary;
+  if (!modelSummaryForModel(name, summary)) return false;
+  printLayers = summary.printLayers;
+  heightMm = summary.heightMm;
+  timeSecs = summary.estimatedSecs;
   return true;
 }
 
@@ -724,7 +716,9 @@ uint64_t sdEntrySizeRecursive(const String &path) {
 }
 
 void appendSummaryObjectJson(String &out, const ModelSummary &summary, uint64_t sizeBytes) {
-  out += "{\"layers\":";
+  out += "{\"sourceLayers\":";
+  out += String(summary.sourceLayers);
+  out += ",\"layers\":";
   out += String(summary.printLayers);
   out += ",\"heightMm\":";
   out += String(summary.heightMm, 2);
@@ -738,21 +732,14 @@ void appendSummaryObjectJson(String &out, const ModelSummary &summary, uint64_t 
 }
 
 void appendModelCompareJson(String &out, const char *key, const String &name) {
-  int printLayers = 0;
-  float heightMm = 0;
-  uint32_t timeSecs = 0;
   out += "\"";
   out += key;
   out += "\":";
-  if (!modelStats(name, printLayers, heightMm, timeSecs)) {
+  ModelSummary summary;
+  if (!modelSummaryForModel(name, summary)) {
     out += "null";
     return;
   }
-
-  ModelSummary summary;
-  summary.printLayers = printLayers;
-  summary.heightMm = heightMm;
-  summary.estimatedSecs = timeSecs;
   appendSummaryObjectJson(out, summary, sdEntrySizeRecursive("/" + name));
 }
 
@@ -942,24 +929,24 @@ void handleApiFileModel() {
     return;
   }
 
-  int printLayers = 0;
-  float heightMm = 0;
-  uint32_t timeSecs = 0;
-  if (!modelStats(name, printLayers, heightMm, timeSecs)) {
+  ModelSummary summary;
+  if (!modelSummaryForModel(name, summary)) {
     sendApiError(400, "model is not printable");
     return;
   }
 
   String out = "{\"ok\":true,\"name\":\"";
   out += jsonEscape(name);
-  out += "\",\"layers\":";
-  out += String(printLayers);
+  out += "\",\"sourceLayers\":";
+  out += String(summary.sourceLayers);
+  out += ",\"layers\":";
+  out += String(summary.printLayers);
   out += ",\"heightMm\":";
-  out += String(heightMm, 2);
+  out += String(summary.heightMm, 2);
   out += ",\"estimatedSecs\":";
-  out += String(timeSecs);
+  out += String(summary.estimatedSecs);
   out += ",\"estimatedTime\":\"";
-  out += formatDuration(timeSecs);
+  out += formatDuration(summary.estimatedSecs);
   out += "\",\"preview\":";
   out += sdPathExists("/" + name + "/preview.png") ? "true" : "false";
 
@@ -974,7 +961,7 @@ void handleApiFileModel() {
   bool resinKnown = getModelMetadataResin(name, ml);
   bool resinOk = resinKnown;
   if (!resinKnown && server.hasArg("estimate")) {
-    resinOk = estimateModelResin(name, printLayers, ml);
+    resinOk = estimateModelResin(name, summary.printLayers, ml);
     if (resinOk) setModelMetadataResin(name, ml);
   }
   out += ",\"resinEstimated\":";
@@ -2159,6 +2146,7 @@ void handleRootPage() {
   <h2 id='modelTitle'>Model</h2>
   <div class='grid'>
     <div><div class='label'>Layers</div><div id='modelLayers' class='value'>-</div></div>
+    <div id='modelSourceLayersBox' class='hidden'><div class='label'>Source layers</div><div id='modelSourceLayers' class='value'>-</div></div>
     <div><div class='label'>Height</div><div id='modelHeight' class='value'>-</div></div>
     <div><div class='label'>Estimated time</div><div id='modelTime' class='value'>-</div></div>
     <div id='modelResinBox' class='hidden'><div class='label'>Resin needed</div><div id='modelResin' class='value'>-</div></div>
@@ -2503,6 +2491,7 @@ const uploadWithProgress=(fd,hintEl)=>{
 const uploadSummary=t=>{
   if(!t)return 'unknown';
   let p=[];
+  if(t.sourceLayers!==undefined&&t.layers!==undefined&&Number(t.sourceLayers)!==Number(t.layers))p.push(t.sourceLayers+' source layers');
   if(t.layers!==undefined)p.push(t.layers+' layers');
   if(t.heightMm!==undefined)p.push(Number(t.heightMm).toFixed(2)+' mm');
   if(t.sizeBytes!==undefined)p.push(formatBytes(t.sizeBytes));
@@ -2783,7 +2772,8 @@ const modelDetails=async(nameEnc,estimate)=>{
   if(!estimate){
     selectedModelConnectPublicId='';
     setText('modelTitle',name); setText('modelLayers','Loading'); setText('modelHeight','-'); setText('modelTime','-');
-    show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
+    setText('modelSourceLayers','-');
+    show('modelSourceLayersBox',false); show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
     show('modelMlButton',true); show('modelPreviewButton',true);
     show('modelShareButton',connectIsReady());
   } else {
@@ -2795,6 +2785,8 @@ const modelDetails=async(nameEnc,estimate)=>{
     const d=await api('/api/files/model?name='+enc(name)+(estimate?'&estimate=1':''));
     selectedModelConnectPublicId=d.connectPublicId||'';
     setText('modelTitle',d.name); setText('modelLayers',d.layers); setText('modelHeight',Number(d.heightMm).toFixed(2)+' mm'); setText('modelTime',d.estimatedTime);
+    const showSource=d.sourceLayers!==undefined&&Number(d.sourceLayers)!==Number(d.layers);
+    show('modelSourceLayersBox',showSource); if(showSource)setText('modelSourceLayers',d.sourceLayers);
     show('modelResinBox',!!d.resinEstimated); if(d.resinEstimated)setText('modelResin',Number(d.resinMl).toFixed(1)+' ml');
     show('modelMlButton',!d.resinEstimated);
     show('modelShareButton',connectIsReady()&&!selectedModelConnectPublicId);
@@ -2950,7 +2942,7 @@ const connectModelHtml=(m,mine)=>{
   h+='</div></a>';
   h+='<div class="connectActions">';
   if(localName)h+='<button class="small"'+(actionDisabled?' disabled':'')+' onclick="startPrint(\''+enc(localName)+'\')">Print</button>';
-  else h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\',\''+enc(m.original_credits||'')+'\',\''+enc(m.license||'')+'\',\''+enc(m.preview_url||'')+'\',\''+enc(m.resin_ml===null||m.resin_ml===undefined?'':m.resin_ml)+'\')">Import</button>';
+  else h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\',\''+enc(m.original_credits||'')+'\',\''+enc(m.license||'')+'\',\''+enc(m.preview_url||'')+'\',\''+enc(m.resin_ml===null||m.resin_ml===undefined?'':m.resin_ml)+'\',\''+enc(m.layers||'')+'\')">Import</button>';
   if(mine){
     // enc(), not esc(): the HTML parser decodes entities inside onclick before
     // the JS runs, so an HTML-escaped quote in server data would still break
@@ -3166,9 +3158,10 @@ const connectModelAction=async(id,action)=>{
   try{await connectPostForm('/api/models/'+enc(id),fd,null);loadConnectModels();}catch(e){msg(e.message,true);}
 };
 window.connectModelAction=connectModelAction;
-const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUrl,resinMl)=>{
+const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUrl,resinMl,serverLayers)=>{
   id=decodeURIComponent(id);name=decodeURIComponent(name);downloadUrl=decodeURIComponent(downloadUrl);
   credits=decodeURIComponent(credits||'');licenseName=decodeURIComponent(licenseName||'');previewUrl=decodeURIComponent(previewUrl||'');resinMl=decodeURIComponent(resinMl||'');
+  serverLayers=parseInt(decodeURIComponent(serverLayers||''))||0;
   if(statusData&&statusData.busy){msg('Printer is busy. Import when idle.',true);return;}
   if(statusData&&statusData.sdReady===false){msg('Insert an SD card before importing models.',true);return;}
   if(!await uiConfirm('Import '+name+' to the printer SD card?'))return;
@@ -3191,7 +3184,11 @@ const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUr
       const previewFull=previewUrl.indexOf('http')===0?previewUrl:connectBase()+previewUrl;
       try{await uploadPreviewFromUrl(finalName,previewFull);}catch(e){previewError=e.message;}
     }
-    msg(previewError?('Imported '+finalName+' to SD, but preview was not saved: '+previewError):('Imported '+finalName+' to SD.'),!!previewError);
+    const sourceLayers=Number(done&&done.sourceLayers)||0,printLayers=Number(done&&done.layers)||0;
+    let note='';
+    if(sourceLayers&&printLayers&&sourceLayers!==printLayers)note+=' Source: '+sourceLayers+' layers; current print setting uses '+printLayers+' layers.';
+    if(serverLayers&&sourceLayers&&serverLayers!==sourceLayers)note+=' Server listed '+serverLayers+' layers.';
+    msg(previewError?('Imported '+finalName+' to SD, but preview was not saved: '+previewError+note):('Imported '+finalName+' to SD.'+note),!!previewError);
     uploadBusy=false;
     connectLocalModels[id]=finalName;
     loadConnectModels(false);
