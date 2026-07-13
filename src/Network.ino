@@ -2241,8 +2241,18 @@ void handleRootPage() {
 </section>
 
 <section id='configView' class='hidden'>
-  <form id='configForm'>
   <div class='card'>
+  <h2>Settings</h2>
+  <div class='connectTabs'>
+    <button id='settingsPrintTabButton' type='button' class='active'>Print</button>
+    <button id='settingsDeviceTabButton' type='button'>Device</button>
+    <button id='settingsNetworkTabButton' type='button'>Network</button>
+    <button id='settingsBootTabButton' type='button'>Boot animation</button>
+    <button id='settingsBackupTabButton' type='button'>Backup</button>
+  </div>
+  </div>
+  <form id='configForm'>
+  <div id='settingsPrintPane' class='settingsPane card'>
   <h2>Print settings</h2>
   <div class='configGrid'>
     <label><span>Layer height (mm)</span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
@@ -2257,19 +2267,25 @@ void handleRootPage() {
     <label><span>Drop back feedrate</span><input name='drop_back_feedrate' id='cfgDropBackFeedrate' type='number' min='20' max='50' step='10'></label>
     <label><span>VAT size (ml)</span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
     <label><span>Low resin warn (ml)</span><input name='low_resin_ml' id='cfgLowResinMl' type='number' min='1' max='3' step='1'></label>
-    <label><span>UI timeout (s, 0=off)</span><input name='ui_timeout' id='cfgUiTimeout' type='number' min='0' max='3600' step='5'></label>
     <label class='check'><input name='low_resin_pause' id='cfgLowResinPause' type='checkbox' value='1'><span>Low resin pause (mid-print)</span></label>
     <label class='check'><input name='ask_refill' id='cfgAskRefill' type='checkbox' value='1'><span>Ask refill before print</span></label>
-    <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
   </div>
   <button type='submit'>Save config</button>
   </div>
-  <div class='card'>
+  <div id='settingsDevicePane' class='settingsPane card hidden'>
+  <h2>Device</h2>
+  <div class='configGrid'>
+    <label><span>UI timeout (s, 0=off)</span><input name='ui_timeout' id='cfgUiTimeout' type='number' min='0' max='3600' step='5'></label>
+    <label class='check'><input name='dry_run' id='cfgDryRun' type='checkbox' value='1'><span>Dry run mode</span></label>
+    <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
+  </div>
+  <button type='submit'>Save config</button>
+  </div>
+  <div id='settingsNetworkPane' class='settingsPane card hidden'>
   <h2>Network &amp; integrations</h2>
   <div class='configGrid'>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
     <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
-    <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
     <div class='subhead'>Smart home - MQTT</div>
     <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT</span></label>
     <div id='mqttFields' class='spanAll hidden'>
@@ -2329,12 +2345,12 @@ void handleRootPage() {
   <button id='configSaveButton' type='submit'>Save config</button>
   </div>
   </form>
-  <div class='card'>
+  <div id='settingsBootPane' class='settingsPane card hidden'>
   <h2>Boot animation</h2>
   <div id='bootAnimList'></div>
   <div id='bootAnimHint' class='hint'>Choose which animation plays at power-on. Send more from the community site; Delete removes one from the SD card.</div>
   </div>
-  <div class='card'>
+  <div id='settingsBackupPane' class='settingsPane card hidden'>
   <h2>Backup &amp; restore</h2>
   <div id='connectBackupTools' class='hidden'>
     <button id='connectAutoBackupButton' class='button' type='button'>Enable Auto backup to Connect</button>
@@ -3343,6 +3359,8 @@ const confirmNetworkToggle=async e=>{
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
 const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
 const updateTgFields=()=>show('tgFields',$('cfgTgEnabled').checked);
+const settingsTabs=['print','device','network','boot','backup'];
+const setSettingsTab=t=>{if(settingsTabs.indexOf(t)<0)t='print';settingsTabs.forEach(x=>{const id=x[0].toUpperCase()+x.slice(1);show('settings'+id+'Pane',x===t);$('settings'+id+'TabButton').classList.toggle('active',x===t);});};
 const updateConnectView=c=>{
   c=c||connectConfig||{};
   const id=c.connectPrinterPublicId||'';
@@ -3440,6 +3458,7 @@ $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
+settingsTabs.forEach(t=>{$('settings'+t[0].toUpperCase()+t.slice(1)+'TabButton').addEventListener('click',()=>setSettingsTab(t));});
 $('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
 $('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
 $('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
@@ -3455,6 +3474,7 @@ $('connectLeaderboardTabButton').addEventListener('click',()=>setConnectTab('lea
 $('modelBackButton').addEventListener('click',()=>openView('home'));
 $('connectSetupButton').addEventListener('click',async()=>{
   openView('config');
+  setSettingsTab('network');
   await loadConfig();
   if(configIsLocallyLocked()||(statusData&&statusData.webControl===false))return;
   $('cfgConnectEnabled').checked=true;
@@ -3464,7 +3484,7 @@ $('connectSetupButton').addEventListener('click',async()=>{
   $('cfgConnectBaseUrl').focus();
   msg('Check the Connect settings, then test the server and register.');
 });
-$('connectSettingsButton').addEventListener('click',async e=>{e.preventDefault();openView('config');await loadConfig();updateConnectFields();const t=$('connectFields').classList.contains('hidden')?$('cfgConnectEnabled').parentElement:$('connectFields');t.scrollIntoView({behavior:'smooth',block:'center'});});
+$('connectSettingsButton').addEventListener('click',async e=>{e.preventDefault();openView('config');setSettingsTab('network');await loadConfig();updateConnectFields();const t=$('connectFields').classList.contains('hidden')?$('cfgConnectEnabled').parentElement:$('connectFields');t.scrollIntoView({behavior:'smooth',block:'center'});});
 
 let updInstalledVer='';
 const cmpVer=(a,b)=>{const pa=String(a).split('.').map(Number),pb=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((pa[i]||0)!==(pb[i]||0))return(pa[i]||0)-(pb[i]||0);}return 0;};
