@@ -963,10 +963,15 @@ void handleApiFileModel() {
   out += ",\"estimatedTime\":\"";
   out += formatDuration(summary.estimatedSecs);
   out += "\",\"preview\":";
-  bool previewExists = sdPathExists("/" + name + "/preview05.png") ||
-                       sdPathExists("/" + name + "/preview1.png") ||
-                       sdPathExists("/" + name + "/preview.png");
+  bool preview05 = sdPathExists("/" + name + "/preview05.png");
+  bool preview1 = sdPathExists("/" + name + "/preview1.png");
+  bool previewLegacy = sdPathExists("/" + name + "/preview.png");
+  bool previewExists = (Layer_Height > 0.06 ? preview1 : preview05) || previewLegacy;
   out += previewExists ? "true" : "false";
+  out += ",\"preview05\":";
+  out += preview05 ? "true" : "false";
+  out += ",\"preview1\":";
+  out += preview1 ? "true" : "false";
 
   String connectPublicId;
   if (getModelMetadataConnectPublicId(name, connectPublicId)) {
@@ -2817,7 +2822,10 @@ const modelDetails=async(nameEnc,estimate)=>{
     show('modelResinBox',!!d.resinEstimated); if(d.resinEstimated)setText('modelResin',Number(d.resinMl).toFixed(1)+' ml');
     show('modelMlButton',!d.resinEstimated);
     show('modelShareButton',connectIsReady()&&!selectedModelConnectPublicId);
-    if(d.preview&&!estimate){show('modelPreviewButton',false);await loadSavedPreview(name);}
+    if(d.preview&&!estimate){
+      try{show('modelPreviewButton',false);await loadSavedPreview(name);}
+      catch(e){show('previewWrap',false);show('modelPreviewButton',true);}
+    }
   }catch(e){msg(e.message,true);}
   finally{$('modelMlButton').disabled=false;$('modelMlButton').textContent='Calculate ml';show('modelProgress',false);}
 };
