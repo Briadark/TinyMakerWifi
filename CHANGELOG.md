@@ -16,6 +16,16 @@ unless noted. Community contributors are tagged inline.
 ## [Unreleased] — `experimental` branch
 
 ### Added
+- **Light theme** — the dashboard gets a light/dark toggle (the crescent next
+  to *Manual*); your choice sticks per browser. Same orange, no flash on load.
+- **Branded WiFi setup** — the `TinyMaker-Setup` portal now shows the project
+  logo, firmware version and where to find the manual, styled to match the
+  dashboard.
+- **Getting started guide** — a dismissible first-steps checklist on the
+  dashboard (WiFi → slicer → first model → first print → exposure →
+  integrations); the printer ticks steps off by itself where it can. Small
+  **?** marks next to tricky settings (layer height, resin tracking, web
+  control, backup) open short explanations.
 - **Exposure test result entry** — after the test strip, the printer asks
   *"Best bar (count dots)?"*: cycle to the number of dots on the crispest bar
   and it sets *Regular exposure* itself — no manual Settings trip. Two extra

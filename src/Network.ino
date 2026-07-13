@@ -1697,7 +1697,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     ".wrap{max-width:560px;margin:16px auto;padding:20px 18px;border:2px solid var(--accent);border-radius:14px;background:var(--wrap)}"
     ".head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}"
     "h1{margin:0;font-size:24px;color:var(--accent)}h2{font-size:17px;margin:0 0 12px;color:var(--text)}.fw{font-size:13px;color:var(--muted)}"
-    "#themeBtn{color:var(--muted);font-size:16px;text-decoration:none;margin-left:6px}#themeBtn:hover{color:var(--text);text-decoration:none}"
+    "#themeBtn,#gsBtn{color:var(--muted);font-size:16px;text-decoration:none;margin-left:6px}#themeBtn:hover,#gsBtn:hover{color:var(--text);text-decoration:none}"
+    // Getting-started rows + the little round contextual-help marks
+    ".gsRow{display:flex;gap:10px;border-top:1px solid var(--line);padding:9px 0;align-items:flex-start}.gsRow:first-child{border-top:0;padding-top:0}"
+    ".gsMark{cursor:pointer;color:var(--muted);font-size:16px;width:22px;flex:0 0 auto;text-align:center;line-height:1.3}.gsMark.on{color:#2fbf4f;cursor:default}"
+    ".qHelp{display:inline-block;margin-left:6px;width:16px;height:16px;line-height:15px;text-align:center;border:1px solid var(--line2);border-radius:50%;font-size:11px;color:var(--muted)}.qHelp:hover{color:var(--text);text-decoration:none}"
     ".card{background:var(--card);border:1px solid var(--line3);border-radius:10px;padding:18px;margin:12px 0}"
     ".grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}"
     ".label{font-size:12px;color:var(--muted)}.value{font-size:16px;margin-top:4px}"
@@ -1801,7 +1805,7 @@ void handleRootPage() {
 #ifdef GIT_REV
     GIT_REV
 #endif
-    R"SPA("></span> · <a id='manualLink' href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a><a href='#' id='themeBtn' title='Light / dark theme'>&#9680;</a></div></div></div>
+    R"SPA("></span> · <a id='manualLink' href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a><a href='#' id='themeBtn' title='Light / dark theme'>&#9680;</a><a href='#' id='gsBtn' title='Getting started guide'>?</a></div></div></div>
 
 <section id='dryRunBanner' class='card banner hidden'>
   <strong>Dry run mode enabled.</strong>
@@ -1818,7 +1822,7 @@ void handleRootPage() {
 
 <div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
 
-<div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:var(--text);font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
+<div id='helpModal' class='modal hidden'><div class='modalCard'><div id='helpBody' style='color:var(--text);font-size:15px;line-height:1.5'></div><div class='modalBtns'><button id='helpClose' type='button'>Close</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1830,6 +1834,12 @@ void handleRootPage() {
 <div id='statusMsg' class='hint'></div>
 
 <div id='homeView'>
+  <section id='gsCard' class='card hidden'>
+    <h2>Getting started</h2>
+    <div id='gsList'></div>
+    <div class='hint'>Circles are steps to do - the printer ticks some off by itself, click the rest when done. Reopen this guide any time with the ? next to Manual.</div>
+    <button id='gsHide' class='button secondary' type='button'>Hide this guide</button>
+  </section>
   <section class='card'>
     <div class='grid'>
       <div><div class='label'>State</div><div id='stateValue' class='value'>Loading</div></div>
@@ -1947,7 +1957,7 @@ void handleRootPage() {
   <div class='card'>
   <h2>Print settings</h2>
   <div class='configGrid'>
-    <label><span>Layer height (mm)</span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
+    <label><span>Layer height (mm)<a href='#' class='qHelp' data-help='layer'>?</a></span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
     <label><span>Base exposure (s)</span><input name='base_exposure' id='cfgBaseExposure' type='number' min='10' max='60' step='1'></label>
     <label><span>Regular exposure (s)</span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
     <label><span>Base layers</span><input name='base_layer' id='cfgBaseLayers' type='number' min='1' max='8' step='1'></label>
@@ -1957,7 +1967,7 @@ void handleRootPage() {
     <label><span>Slow lift feedrate</span><input name='slow_lift_feedrate' id='cfgSlowLiftFeedrate' type='number' min='20' max='50' step='10'></label>
     <label><span>Fast lift feedrate</span><input name='fast_lift_feedrate' id='cfgFastLiftFeedrate' type='number' min='20' max='50' step='10'></label>
     <label><span>Drop back feedrate</span><input name='drop_back_feedrate' id='cfgDropBackFeedrate' type='number' min='20' max='50' step='10'></label>
-    <label><span>VAT size (ml)</span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
+    <label><span>VAT size (ml)<a href='#' class='qHelp' data-help='resin'>?</a></span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
     <label><span>Low resin warn (ml)</span><input name='low_resin_ml' id='cfgLowResinMl' type='number' min='1' max='3' step='1'></label>
     <label><span>UI timeout (s, 0=off)</span><input name='ui_timeout' id='cfgUiTimeout' type='number' min='0' max='3600' step='5'></label>
     <label class='check'><input name='low_resin_pause' id='cfgLowResinPause' type='checkbox' value='1'><span>Low resin pause (mid-print)</span></label>
@@ -1970,7 +1980,7 @@ void handleRootPage() {
   <h2>Network &amp; integrations</h2>
   <div class='configGrid'>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
-    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
+    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)<a href='#' class='qHelp' data-help='web'>?</a></span></label>
     <label class='check spanAll'><input name='boot_update_check' id='cfgBootUpdateCheck' type='checkbox' value='1'><span>Boot update check</span></label>
     <label class='check spanAll'><input name='stats_ping' id='cfgStatsPing' type='checkbox' value='1'><span>Anonymous usage ping (version + print hours, once per update)</span></label>
     <div class='subhead'>Smart home - MQTT</div>
@@ -2021,7 +2031,7 @@ void handleRootPage() {
   <div id='bootAnimHint' class='hint'>Choose which animation plays at power-on. Send more from the community site; Delete removes one from the SD card.</div>
   </div>
   <div class='card'>
-  <h2>Backup &amp; restore</h2>
+  <h2>Backup &amp; restore<a href='#' class='qHelp' data-help='backup'>?</a></h2>
   <div class='actions'>
     <button id='backupDownloadButton' class='button secondary' type='button'>Download backup</button>
     <button id='backupSdButton' class='button secondary' type='button'>Backup to SD</button>
@@ -2315,6 +2325,7 @@ const refreshStatus=async()=>{
     if(updLock&&!updSawDown&&Date.now()-updLockAt>90000){updLock=false;$('updOverlay').classList.remove('on');msg('Update did not start - the printer never went down. Check System > Update on the printer.',true);}
     statusFailCount=0;
     applyStatus(s);
+    if(typeof renderGs==='function')renderGs(); // auto-tick "first print"
     if(!pendingPrintCmd)msg('',false);
   }catch(e){
     statusFailCount++;
@@ -2356,6 +2367,7 @@ const loadFiles=async()=>{
     filesItems=d.items;filesHidden=d.hiddenCount||0;
     show('filesFilter',filesItems.length>FILES_PER_PAGE);
     renderFiles();
+    if(typeof renderGs==='function')renderGs(); // auto-tick "model on SD"
   }catch(e){updateSdUsage(null);list.innerHTML='<div class="hint warn">'+e.message+'</div>';}
 };
 
@@ -2792,14 +2804,46 @@ $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
 $('cfgTgEnabled').addEventListener('change',updateTgFields);
 $('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
-$('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
+// Contextual help: one modal, content picked by key (.qHelp marks + Telegram).
+const HELP={
+ tg:"<b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol>",
+ layer:"<b>Layer height</b><p>Unlike FDM, the printed layer height is decided by THIS setting, not by the sliced file. Files are always a stack of 0.05 mm images: at 0.05 the printer uses every image, at 0.10 it takes every other one. Always slice with the 0.05 mm profile.</p>",
+ resin:"<b>Resin tracking</b><p>The printer has no resin sensor - it counts down an estimate from a full VAT (this size). Press <b>VAT refilled</b> after topping up, and keep <b>Ask refill</b> on so the estimate stays honest. It warns before a print that will not fit and can pause mid-print when low.</p>",
+ web:"<b>Web control</b><p>Off = this dashboard turns view-only: anyone can watch, but print control, uploads, settings and firmware updates are disabled. Turn it back on at the printer (System &gt; Advanced). Slicer upload and MQTT keep working.</p>",
+ backup:"<b>Backup &amp; restore</b><p>One file holds every setting plus the lifetime counters. <b>Backup to SD</b> before a full USB reflash - the printer offers to restore it on first boot. The file contains your MQTT password and tokens, so treat it like a secret.</p>"};
+const showHelp=k=>{$('helpBody').innerHTML=HELP[k]||'';show('helpModal',true);};
+document.addEventListener('click',e=>{const q=e.target.closest('.qHelp');if(q){e.preventDefault();showHelp(q.dataset.help);}});
+// Getting started: dismissible first-steps checklist. Some steps tick
+// themselves from live data; the rest are clicked off and remembered.
+const GS=[
+ {k:'wifi',t:'Connect to WiFi',d:'Done - you are looking at the dashboard.',auto:()=>true},
+ {k:'slicer',t:'Set up PrusaSlicer',d:"Import the profile, add a physical printer at tinymaker.local - <a href='https://slibbinas.github.io/TinyMakerWifi/manual/#print-prusa' target='_blank' rel='noopener'>manual</a>."},
+ {k:'model',t:'Get a model onto the SD card',d:'Send from the slicer, upload in SD manager, or copy an .sl1/.zip to the card.',auto:()=>filesItems.some(i=>i.type==='model')},
+ {k:'print',t:'Run your first print',d:'Pick the model in the Print menu or press Start here.',auto:()=>!!(statusData&&Number(statusData.lifetimePrintSecs)>0)},
+ {k:'expo',t:'Calibrate exposure for your resin',d:"System &gt; Advanced &gt; Exposure test - pick the best bar and the printer sets the time. <a href='https://slibbinas.github.io/TinyMakerWifi/manual/#advanced' target='_blank' rel='noopener'>Manual</a>."},
+ {k:'integr',t:'Optional: integrations',d:'Telegram, Home Assistant (MQTT) and TinyMaker Connect live in Settings.'}];
+const gsDone=s=>(s.auto&&s.auto())||localStorage.getItem('tmGs_'+s.k)==='1';
+const renderGs=()=>{
+  const hidden=localStorage.getItem('tmGsHidden')==='1';
+  show('gsCard',!hidden);
+  if(hidden)return;
+  $('gsList').innerHTML=GS.map(s=>{
+    const on=gsDone(s);
+    return "<div class='gsRow'><span class='gsMark"+(on?" on":"")+"' data-gs='"+s.k+"'>"+(on?"&#10003;":"&#9675;")+"</span><div><b>"+s.t+"</b><div class='meta'>"+s.d+"</div></div></div>";
+  }).join('');
+};
+$('gsList').addEventListener('click',e=>{const m=e.target.closest('.gsMark');if(!m)return;const s=GS.find(x=>x.k===m.dataset.gs);if(!s||(s.auto&&s.auto()))return;const key='tmGs_'+s.k;localStorage.setItem(key,localStorage.getItem(key)==='1'?'0':'1');renderGs();});
+$('gsHide').addEventListener('click',()=>{localStorage.setItem('tmGsHidden','1');renderGs();});
+$('gsBtn').addEventListener('click',e=>{e.preventDefault();localStorage.setItem('tmGsHidden','0');openView('home');renderGs();$('gsCard').scrollIntoView({behavior:'smooth',block:'start'});});
+renderGs();
+$('tgHelpButton').addEventListener('click',()=>showHelp('tg'));
 // Light/dark toggle: flips the html data-theme attribute the boot script set,
 // persists to localStorage and keeps the Manual link's theme param in sync.
 const applyThemeLink=()=>{const l=document.documentElement.getAttribute('data-theme')==='light';$('manualLink').href='https://slibbinas.github.io/TinyMakerWifi/manual/'+(l?'':'?theme=dark');};
 $('themeBtn').addEventListener('click',e=>{e.preventDefault();const toLight=document.documentElement.getAttribute('data-theme')!=='light';if(toLight)document.documentElement.setAttribute('data-theme','light');else document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('tmTheme',toLight?'light':'dark');}catch(err){}applyThemeLink();});
 applyThemeLink();
-$('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
-$('tgHelpModal').addEventListener('click',e=>{if(e.target===$('tgHelpModal'))show('tgHelpModal',false);});
+$('helpClose').addEventListener('click',()=>show('helpModal',false));
+$('helpModal').addEventListener('click',e=>{if(e.target===$('helpModal'))show('helpModal',false);});
 $('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
