@@ -1283,7 +1283,9 @@ void applyConfigRequest() {
   connectBaseUrl = connectNormalizeBaseUrl(formString("connect_base_url", connectBaseUrl, 128));
   connectPrinterName = formString("connect_printer_name", connectPrinterName, 64);
   connectLeaderboardOptIn = connectEnabled && server.hasArg("connect_leaderboard");
-  connectAutoBackup = server.hasArg("connect_auto_backup");
+  if (server.hasArg("connect_auto_backup_set")) {
+    connectAutoBackup = server.hasArg("connect_auto_backup");
+  }
   tgEnabled = server.hasArg("tg_enabled");
   if (!wifiEnabled) tgEnabled = false;
   // Token is a secret: only overwrite when a new one is supplied, so a blank
@@ -3426,7 +3428,7 @@ let sdBackupPresent=false; // from /api/config; part of the restoreSdButton gate
 // restoreSdButton's disabled state is owned HERE (lock + backup-present) - the
 // 2s status poll re-runs this, so a per-button override elsewhere gets wiped.
 const setConfigDisabled=disabled=>{document.querySelectorAll('#configForm input,#configForm button,#configDefaultsButton,#configMqttResetButton,#backupDownloadButton,#backupSdButton,#restoreButton,#restoreSdButton,#connectAutoBackupButton,#connectBackupDownloadButton,#connectBackupRestoreButton').forEach(e=>e.disabled=disabled);$('restoreSdButton').disabled=disabled||!sdBackupPresent;};
-const configFormData=autoBackupOverride=>{const fd=new FormData($('configForm'));const auto=typeof autoBackupOverride==='boolean'?autoBackupOverride:!!(connectConfig&&connectConfig.connectAutoBackup);if(auto)fd.append('connect_auto_backup','1');return fd;};
+const configFormData=autoBackupOverride=>{const fd=new FormData($('configForm'));const auto=typeof autoBackupOverride==='boolean'?autoBackupOverride:!!(connectConfig&&connectConfig.connectAutoBackup);fd.append('connect_auto_backup_set','1');if(auto)fd.append('connect_auto_backup','1');return fd;};
 const configIsLocallyLocked=()=>!!(statusData&&statusData.busy);
 const updateNetworkFields=()=>{$('cfgWebDashboardEnabled').disabled=!$('cfgWifiEnabled').checked;};
 const confirmNetworkToggle=async e=>{
