@@ -43,6 +43,7 @@
 #include "FreeSans8pt7b.h"       // Custom font
 #include <PNGdec.h>              // PNG decoder library for reading print layers
 #include <SdFat.h>               // SD card file system library
+#include <esp_system.h>          // hardware random for boot-animation shuffle
 #include "ModelImport.h"         // Shared ZIP import result/option structs
 
 #if ENABLE_NETWORK

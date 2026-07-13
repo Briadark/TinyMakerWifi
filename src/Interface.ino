@@ -110,6 +110,11 @@ void netProgressBar(int step, int total) {
 // on-device menu + playback work in the network-free build too; the /api/boot-anim
 // endpoints and dashboard card live in Network.ino.
 #define BOOTANIM_DIR "/bootanim"
+#define BOOTANIM_SHUFFLE "__shuffle"
+
+bool bootAnimShuffleSelected(const String &name) {
+  return name == BOOTANIM_SHUFFLE;
+}
 
 // Keep only [a-z0-9-_], lowercase, <=40 chars; never empty (used as a filename).
 String sanitizeAnimName(const String &in) {
@@ -155,6 +160,7 @@ bool bootAnimExists(const String &name) {
 // "cure-line" -> "Cure Line" for the menu value / dashboard label.
 String bootAnimDisplay(const String &name) {
   if (name.length() == 0) return "Default";
+  if (bootAnimShuffleSelected(name)) return "Shuffle";
   String out;
   bool up = true;
   for (size_t i = 0; i < name.length(); i++) {
@@ -166,14 +172,23 @@ String bootAnimDisplay(const String &name) {
   return out;
 }
 
-// Advanced-menu cycle order: Default ("") -> each file -> back to Default.
+// Advanced-menu cycle order: Default ("") -> Shuffle (when useful) -> each file -> back to Default.
 String nextBootAnim(const String &current) {
   String names[24];
   int n = listBootAnims(names, 24);
-  if (current.length() == 0) return n > 0 ? names[0] : String("");
+  if (current.length() == 0) return n > 1 ? String(BOOTANIM_SHUFFLE) : (n > 0 ? names[0] : String(""));
+  if (bootAnimShuffleSelected(current)) return n > 0 ? names[0] : String("");
   for (int i = 0; i < n; i++)
     if (names[i] == current) return (i + 1 < n) ? names[i + 1] : String("");
   return "";  // current was deleted -> back to Default
+}
+
+String resolveBootAnimForPlayback(const String &selected) {
+  if (!bootAnimShuffleSelected(selected)) return selected;
+  String names[24];
+  int n = listBootAnims(names, 24);
+  if (n < 2) return "";
+  return names[esp_random() % n];
 }
 
 // Play the selected boot animation from the /bootanim library. Returns true if
@@ -183,6 +198,8 @@ bool playBootAnimFromSd() {
   sysPrefs.begin("tinymaker", true);
   String name = sysPrefs.getString("bootAnimName", "");
   sysPrefs.end();
+  if (name.length() == 0) return false;
+  name = resolveBootAnimForPlayback(name);
   if (name.length() == 0) return false;
 
   String path = "/bootanim/" + name + ".tmb";
@@ -496,8 +513,11 @@ String advancedValue(int item) {
   if (item == 7) return wifiEnabled ? "On" : "Off";
   if (item == 8) return bootUpdateCheckEnabled ? "On" : "Off";
   if (item == 9) return String(expTestBarSecs(1)) + "-" + String(expTestBarSecs(8)) + "s strip";
-  if (item == 10) return bootAnimName.length() == 0 ? "Default"
-    : (bootAnimExists(bootAnimName) ? bootAnimDisplay(bootAnimName) : bootAnimDisplay(bootAnimName) + " (missing)");
+  if (item == 10) {
+    if (bootAnimName.length() == 0) return "Default";
+    if (bootAnimShuffleSelected(bootAnimName)) return "Shuffle";
+    return bootAnimExists(bootAnimName) ? bootAnimDisplay(bootAnimName) : bootAnimDisplay(bootAnimName) + " (missing)";
+  }
   if (wifiEnabled && item == 11) return webDashboardEnabled ? "On" : "Off";
   if (wifiEnabled && advancedMqttConfigured() && item == 12) return mqttEnabled ? "On" : "Off";
   return "";

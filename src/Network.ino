@@ -2201,6 +2201,9 @@ void handleRootPage() {
     <div class='hint'>Install community boot animations to the SD card. The installed animation becomes the active power-on animation.</div>
     <h2 style='margin-top:14px'>Installed</h2>
     <div id='connectInstalledBootAnimList' class='files' style='margin-top:10px'></div>
+    <div id='connectBootAnimShuffleBox' class='actions hidden' style='margin-top:10px'>
+      <button id='connectBootAnimShuffleButton' class='button secondary' type='button'>Shuffle installed</button>
+    </div>
     <h2 style='margin-top:14px'>Connect library</h2>
     <div id='connectBootAnimList' class='files' style='margin-top:10px'></div>
   </div>
@@ -2518,7 +2521,8 @@ const loadBootAnims=async()=>{
     const sel=d.selected||'';
     wrap.innerHTML='';
     wrap.style.cssText='display:flex;flex-direction:column;gap:2px;margin:8px 0 4px';
-    const rows=[{name:'',display:'Default (built-in)'}].concat(d.animations||[]);
+    const installed=d.animations||[];
+    const rows=[{name:'',display:'Default (built-in)'}].concat(installed.length>1?[{name:'__shuffle',display:'Shuffle installed animations'}]:[]).concat(installed);
     rows.forEach(a=>{
       const active=sel===a.name;
       const row=document.createElement('div');
@@ -2536,16 +2540,21 @@ const loadBootAnims=async()=>{
       label.textContent=a.display;
 
       pick.appendChild(dot);pick.appendChild(label);
-      if(a.name){
+      if(a.name&&a.name!=='__shuffle'){
         const meta=document.createElement('span');
         meta.style.cssText='flex:0 0 auto;color:#8a8a92;font-size:12px';
         meta.textContent=formatBytes(a.sizeBytes);
+        pick.appendChild(meta);
+      }else if(a.name==='__shuffle'){
+        const meta=document.createElement('span');
+        meta.style.cssText='flex:0 0 auto;color:#8a8a92;font-size:12px';
+        meta.textContent='random';
         pick.appendChild(meta);
       }
       pick.addEventListener('click',()=>selectBootAnim(a.name));
       row.appendChild(pick);
 
-      if(a.name){
+      if(a.name&&a.name!=='__shuffle'){
         const del=document.createElement('button');
         del.type='button';
         del.style.cssText='flex:0 0 auto;width:auto;white-space:nowrap;margin:0;padding:5px 13px;font-size:12.5px;background:transparent;border:1px solid #44343a;color:#e08a92;border-radius:7px;cursor:pointer';
@@ -2559,7 +2568,7 @@ const loadBootAnims=async()=>{
 };
 const selectBootAnim=async name=>{
   try{await api('/api/boot-anim/select',{method:'POST',body:new URLSearchParams({name})});
-    msg(name?'Boot animation set. Reboot to see it.':'Using the built-in boot animation.');loadBootAnims();}
+    msg(name==='__shuffle'?'Shuffle enabled. Reboot to see a random installed animation.':(name?'Boot animation set. Reboot to see it.':'Using the built-in boot animation.'));loadBootAnims();}
   catch(e){msg(e.message,true);}
 };
 const deleteBootAnim=async(name,display)=>{
@@ -2947,7 +2956,12 @@ const renderTmbCanvas=async(cv,url)=>{
 };
 const renderBootAnimPreviews=root=>{
   root.querySelectorAll('canvas[data-tmb-url]').forEach(cv=>{
-    renderTmbCanvas(cv,cv.dataset.tmbUrl).catch(()=>{const p=cv.parentElement;if(p)p.innerHTML='<span class="meta">Preview unavailable</span>';});
+    const fallback=cv.dataset.tmbFallback||'';
+    const fail=()=>{const p=cv.parentElement;if(p)p.innerHTML='<span class="meta">Preview unavailable</span>';};
+    renderTmbCanvas(cv,cv.dataset.tmbUrl).catch(()=>{
+      if(fallback&&fallback!==cv.dataset.tmbUrl)renderTmbCanvas(cv,fallback).catch(fail);
+      else fail();
+    });
   });
 };
 const loadLocalBootAnimations=async()=>{
@@ -2962,7 +2976,11 @@ const connectInstalledBootAnimHtml=(a,isDefault)=>{
   const actionDisabled=(statusData&&statusData.busy)||(statusData&&statusData.webControl===false);
   let h='<div class="connectTile">';
   if(isDefault)h+='<div class="bootAnimPreview"><span class="meta">Built-in TinyMaker boot screen</span></div>';
-  else h+='<div class="bootAnimPreview"><canvas data-tmb-url="/api/boot-anim/file?name='+enc(a.name)+'"></canvas></div>';
+  else{
+    const localUrl='/api/boot-anim/file?name='+enc(a.name);
+    const connectPreview=a.connectPublicId?connectBase()+'/api/boot-animations/'+enc(a.connectPublicId)+'/preview':'';
+    h+='<div class="bootAnimPreview"><canvas data-tmb-url="'+esc(connectPreview||localUrl)+'"'+(connectPreview?' data-tmb-fallback="'+esc(localUrl)+'"':'')+'></canvas></div>';
+  }
   h+='<h2>'+esc(isDefault?'Default':(a.animationName||a.display))+'</h2><div class="pills">';
   if(active)h+='<span class="pill">Active</span>';
   if(!isDefault)h+='<span class="pill">'+formatBytes(a.sizeBytes||0)+'</span>';
@@ -2975,6 +2993,14 @@ const connectInstalledBootAnimHtml=(a,isDefault)=>{
 };
 const renderInstalledBootAnimations=d=>{
   const items=d.animations||[];
+  const canShuffle=items.length>1;
+  const shuffleActive=activeBootAnim==='__shuffle';
+  show('connectBootAnimShuffleBox',canShuffle);
+  if(canShuffle){
+    const actionDisabled=(statusData&&statusData.busy)||(statusData&&statusData.webControl===false);
+    $('connectBootAnimShuffleButton').disabled=!!actionDisabled||shuffleActive;
+    $('connectBootAnimShuffleButton').textContent=shuffleActive?'Shuffle active':'Shuffle installed';
+  }
   $('connectInstalledBootAnimList').innerHTML='<div class="connectTiles">'+[connectInstalledBootAnimHtml({},true)].concat(items.map(a=>connectInstalledBootAnimHtml(a,false))).join('')+'</div>';
   renderBootAnimPreviews($('connectInstalledBootAnimList'));
 };
@@ -3009,6 +3035,7 @@ const loadConnectBootAnimations=async()=>{
   clearBootAnimPreviews();
   $('connectInstalledBootAnimList').innerHTML='<div class="hint">Loading installed boot animations...</div>';
   $('connectBootAnimList').innerHTML='<div class="hint">Loading boot animations...</div>';
+  show('connectBootAnimShuffleBox',false);
   try{renderInstalledBootAnimations(await loadLocalBootAnimations());}
   catch(e){$('connectInstalledBootAnimList').innerHTML='<div class="hint warn">'+esc(e.message)+'</div>';}
   try{
@@ -3340,6 +3367,7 @@ $('configMqttResetButton').addEventListener('click',async()=>{if(!await uiConfir
 $('configConnectResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset TinyMaker Connect settings and forget this printer token?',{danger:true}))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectBootAnimShuffleButton').addEventListener('click',()=>connectActivateBootAnim('__shuffle'));
 $('backupDownloadButton').addEventListener('click',async()=>{try{const r=await fetch('/api/config/backup',{cache:'no-store'});if(!r.ok)throw new Error('backup failed (HTTP '+r.status+')');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tinymaker-backup.json';a.click();URL.revokeObjectURL(a.href);msg('Backup downloaded.');}catch(e){msg(e.message,true);}});
 $('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');loadConfig();}catch(e){msg(e.message,true);}});
 $('restoreButton').addEventListener('click',()=>$('restoreFile').click());
@@ -3844,7 +3872,9 @@ void handleApiBootAnimList() {
   if (!sdCardReady()) { sendApiError(503, "sd card unavailable"); return; }
   String names[24];
   int n = listBootAnims(names, 24);
-  String out = "{\"selected\":\"" + jsonEscape(bootAnimName) + "\",\"animations\":[";
+  String selected = bootAnimName;
+  if (bootAnimShuffleSelected(selected) && n < 2) selected = "";
+  String out = "{\"selected\":\"" + jsonEscape(selected) + "\",\"animations\":[";
   for (int i = 0; i < n; i++) {
     if (i) out += ",";
     String path = String(BOOTANIM_DIR) + "/" + names[i] + ".tmb";
@@ -3888,7 +3918,12 @@ void handleApiBootAnimSelect() {
   if (printerBusy()) { sendApiError(409, "printer busy"); return; }
   String name = server.arg("name");
   name.trim();
-  if (name.length() > 0 && !bootAnimExists(name)) { sendApiError(404, "animation not found"); return; }
+  if (name.length() > 0 && !bootAnimShuffleSelected(name)) name = sanitizeAnimName(name);
+  if (bootAnimShuffleSelected(name)) {
+    String names[2];
+    if (listBootAnims(names, 2) < 2) { sendApiError(409, "shuffle needs at least two animations"); return; }
+  }
+  if (name.length() > 0 && !bootAnimShuffleSelected(name) && !bootAnimExists(name)) { sendApiError(404, "animation not found"); return; }
   bootAnimName = name;
   saveDeviceConfig();
   sendApiOk("\"selected\":\"" + jsonEscape(bootAnimName) + "\"");
@@ -3901,11 +3936,16 @@ void handleApiBootAnimDelete() {
   if (!sdCardReady()) { sendApiError(503, "sd card unavailable"); return; }
   String name = server.arg("name");
   name.trim();
+  name = sanitizeAnimName(name);
   if (name.length() == 0 || !bootAnimExists(name)) { sendApiError(404, "animation not found"); return; }
   String path = String(BOOTANIM_DIR) + "/" + name + ".tmb";
   SD.remove(path.c_str());
   SD.remove(bootAnimMetadataPath(name).c_str());
-  if (bootAnimName == name) { bootAnimName = ""; saveDeviceConfig(); }  // fall back to Default
+  String names[2];
+  if (bootAnimName == name || (bootAnimShuffleSelected(bootAnimName) && listBootAnims(names, 2) < 2)) {
+    bootAnimName = "";
+    saveDeviceConfig();
+  }  // fall back to Default
   sendApiOk("");
 }
 
