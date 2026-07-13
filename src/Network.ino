@@ -1988,6 +1988,11 @@ void handleRootPage() {
   </div>
   </form>
   <div class='card'>
+  <h2>Boot animation</h2>
+  <div id='bootAnimList'></div>
+  <div id='bootAnimHint' class='hint'>Choose which animation plays at power-on. Send more from the community site; Delete removes one from the SD card.</div>
+  </div>
+  <div class='card'>
   <h2>Backup &amp; restore</h2>
   <div class='actions'>
     <button id='backupDownloadButton' class='button secondary' type='button'>Download backup</button>
@@ -2001,12 +2006,6 @@ void handleRootPage() {
   <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
   </div>
   <div id='configHint' class='hint'>Config locks automatically while printing.</div>
-</section>
-
-<section id='bootAnimView' class='card hidden'>
-  <h2>Boot animation</h2>
-  <div id='bootAnimList'></div>
-  <div id='bootAnimHint' class='hint'>Choose which animation plays at power-on. Send more from the community site; Delete removes one from the SD card.</div>
 </section>
 
 <section id='updateView' class='card hidden'>
@@ -2194,7 +2193,6 @@ const openView=view=>{
   show('modelPanel',view==='model');
   show('connectView',view==='connect');
   show('configView',view==='config');
-  show('bootAnimView',view==='config');
   show('updateView',view==='update');
   $('homeViewButton').classList.toggle('active',view==='home'||view==='model');
   $('connectViewButton').classList.toggle('active',view==='connect');
