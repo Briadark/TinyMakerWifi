@@ -276,11 +276,13 @@ String otaStyledPage(const String &inner) {
   return String(
     "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker firmware update</title>"
-    // Inline data-URI favicon (orange rounded square with a white T) -
+    // Inline data-URI favicon (project logo: layer stack + WiFi arc) -
     // shows in the browser tab and bookmarks, nothing stored on the device
-    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
-    "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
-    "<text x='8' y='12.5' font-family='Arial' font-size='11' font-weight='bold' fill='white' text-anchor='middle'>T</text></svg>\">"
+    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+    "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+    "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
     "<style>"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
@@ -1666,9 +1668,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
   server.sendContent_P(PSTR(
     "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker</title>"
-    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
-    "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
-    "<text x='8' y='12.5' font-family='Arial' font-size='11' font-weight='bold' fill='white' text-anchor='middle'>T</text></svg>\">"
+    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+    "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+    "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
     "<style>"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;background:#1c1c1e;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#eee}"
@@ -2021,6 +2025,7 @@ void handleRootPage() {
     <div><div class='label'>Latest</div><div id='updLatest' class='value'>-</div></div>
   </div>
   <div id='updMsg' class='hint'>Checking...</div>
+  <div id='communityStats' class='hint hidden'></div>
   <div class='actions'>
     <button id='updInstallLatest' class='spanAll' type='button' disabled>Install latest</button>
   </div>
@@ -2809,6 +2814,14 @@ const loadUpdate=async()=>{
   setText('updInstalled',updInstalledVer||'-');setText('updLatest','-');
   $('updMsg').textContent='Checking the latest version - takes up to ~10 s...';
   $('updInstallLatest').disabled=true;
+  // Community install counter - straight from the stats endpoint, best-effort.
+  fetch('https://tinymaker-stats.slibbinas.workers.dev/stats').then(r=>r.json()).then(s=>{
+    if(!s.printers)return;
+    let top='',n=0;const bv=s.by_version||{};
+    for(const v in bv)if(bv[v]>n){n=bv[v];top=v;}
+    setText('communityStats','Community: '+s.printers+' printer'+(s.printers===1?'':'s')+' running TinyMakerWifi'+(top?' - most on '+top:''));
+    show('communityStats',true);
+  }).catch(()=>{});
   try{
     const r=await fetch('https://slibbinas.github.io/TinyMakerWifi/versions.txt',{cache:'no-store'});
     if(!r.ok)throw 0;
