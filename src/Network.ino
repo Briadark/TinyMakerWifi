@@ -283,6 +283,8 @@ void finishUpload() {
     out += ",\"sourceLayers\":";
     out += String(result.summary.sourceLayers);
     out += ",\"layers\":";
+    out += String(result.summary.sourceLayers);
+    out += ",\"printLayers\":";
     out += String(result.summary.printLayers);
     out += ",\"heightMm\":";
     out += String(result.summary.heightMm, 2);
@@ -307,7 +309,10 @@ void handlePreviewUploadData() {
 
   if (up.status == UPLOAD_FILE_START) {
     previewUploadName = server.arg("name");
-    previewUploadPath = "/" + previewUploadName + "/preview.png";
+    String previewType = server.arg("type");
+    if (previewType == "05") previewUploadPath = "/" + previewUploadName + "/preview05.png";
+    else if (previewType == "1") previewUploadPath = "/" + previewUploadName + "/preview1.png";
+    else previewUploadPath = "/" + previewUploadName + "/preview.png";
     previewUploadOk = false;
     previewUploadRejected = false;
 
@@ -384,8 +389,14 @@ void handleApiFileModelPreview() {
     return;
   }
 
-  String path = "/" + name + "/preview.png";
+  String previewType = server.arg("type");
+  String path;
+  if (previewType == "05") path = "/" + name + "/preview05.png";
+  else if (previewType == "1") path = "/" + name + "/preview1.png";
+  else path = Layer_Height > 0.06 ? "/" + name + "/preview1.png" : "/" + name + "/preview05.png";
+
   File f = SD.open(path.c_str());
+  if (!f && previewType.length() == 0) f = SD.open(("/" + name + "/preview.png").c_str());
   if (!f) {
     sendApiError(404, "preview not found");
     return;
@@ -719,6 +730,8 @@ void appendSummaryObjectJson(String &out, const ModelSummary &summary, uint64_t 
   out += "{\"sourceLayers\":";
   out += String(summary.sourceLayers);
   out += ",\"layers\":";
+  out += String(summary.sourceLayers);
+  out += ",\"printLayers\":";
   out += String(summary.printLayers);
   out += ",\"heightMm\":";
   out += String(summary.heightMm, 2);
@@ -940,6 +953,8 @@ void handleApiFileModel() {
   out += "\",\"sourceLayers\":";
   out += String(summary.sourceLayers);
   out += ",\"layers\":";
+  out += String(summary.sourceLayers);
+  out += ",\"printLayers\":";
   out += String(summary.printLayers);
   out += ",\"heightMm\":";
   out += String(summary.heightMm, 2);
@@ -948,7 +963,10 @@ void handleApiFileModel() {
   out += ",\"estimatedTime\":\"";
   out += formatDuration(summary.estimatedSecs);
   out += "\",\"preview\":";
-  out += sdPathExists("/" + name + "/preview.png") ? "true" : "false";
+  bool previewExists = sdPathExists("/" + name + "/preview05.png") ||
+                       sdPathExists("/" + name + "/preview1.png") ||
+                       sdPathExists("/" + name + "/preview.png");
+  out += previewExists ? "true" : "false";
 
   String connectPublicId;
   if (getModelMetadataConnectPublicId(name, connectPublicId)) {
@@ -1074,7 +1092,9 @@ void handleApiFileLayer() {
     sendApiError(400, "bad layer index");
     return;
   }
-  long fileIdx = (Layer_Height > 0.06) ? (2 * i - 1) : i;
+  bool rawSource = server.hasArg("source") && server.arg("source") == "1";
+  float layerHeight = server.hasArg("layer_height") ? server.arg("layer_height").toFloat() : Layer_Height;
+  long fileIdx = rawSource ? i : ((layerHeight > 0.06) ? (2 * i - 1) : i);
   String path = "/" + name + "/" + String(fileIdx) + ".png";
   File f = SD.open(path.c_str());
   if (!f) {
@@ -1846,6 +1866,8 @@ void handleApiStatus() {
   out += jsonEscape(printerStateText());
   out += "\",\"stateCode\":";
   out += String(current_state);
+  out += ",\"layerHeight\":";
+  out += String(Layer_Height, 2);
   out += ",\"wifiRssi\":";
   out += connected ? String(WiFi.RSSI()) : String(0);
   out += ",\"wifiText\":\"";
@@ -2146,7 +2168,7 @@ void handleRootPage() {
   <h2 id='modelTitle'>Model</h2>
   <div class='grid'>
     <div><div class='label'>Layers</div><div id='modelLayers' class='value'>-</div></div>
-    <div id='modelSourceLayersBox' class='hidden'><div class='label'>Source layers</div><div id='modelSourceLayers' class='value'>-</div></div>
+    <div id='modelPrintLayersBox' class='hidden'><div class='label'>Print layers</div><div id='modelPrintLayers' class='value'>-</div></div>
     <div><div class='label'>Height</div><div id='modelHeight' class='value'>-</div></div>
     <div><div class='label'>Estimated time</div><div id='modelTime' class='value'>-</div></div>
     <div id='modelResinBox' class='hidden'><div class='label'>Resin needed</div><div id='modelResin' class='value'>-</div></div>
@@ -2191,6 +2213,10 @@ void handleRootPage() {
     <div id='connectBrowserBox' class='hidden' style='margin-top:14px'>
       <h2>Models</h2>
       <div class='hint'>Shared models can be downloaded from TinyMaker Connect. To publish one of your own models, open SD manager, press Details, then Share model.</div>
+      <div class='connectTabs' style='margin-top:10px'>
+        <button id='connectPreview05Button' type='button' class='active'>Show 0.05 mm</button>
+        <button id='connectPreview1Button' type='button'>Show 0.10 mm</button>
+      </div>
       <div id='connectModelsList' class='files' style='margin-top:10px'></div>
     </div>
     <div id='connectManagerBox' class='hidden' style='margin-top:14px'>
@@ -2491,8 +2517,8 @@ const uploadWithProgress=(fd,hintEl)=>{
 const uploadSummary=t=>{
   if(!t)return 'unknown';
   let p=[];
-  if(t.sourceLayers!==undefined&&t.layers!==undefined&&Number(t.sourceLayers)!==Number(t.layers))p.push(t.sourceLayers+' source layers');
   if(t.layers!==undefined)p.push(t.layers+' layers');
+  if(t.printLayers!==undefined&&t.layers!==undefined&&Number(t.printLayers)!==Number(t.layers))p.push(t.printLayers+' print layers');
   if(t.heightMm!==undefined)p.push(Number(t.heightMm).toFixed(2)+' mm');
   if(t.sizeBytes!==undefined)p.push(formatBytes(t.sizeBytes));
   if(t.estimatedTime)p.push(t.estimatedTime);
@@ -2520,14 +2546,15 @@ const uploadModelPayload=async(blob,filename,hintEl,meta)=>{
     return await send(choice);
   }
 };
-const uploadModelPreview=async(name,blob)=>{
+const uploadModelPreview=async(name,blob,type)=>{
   if(!name||!blob)return false;
   const fd=new FormData();
-  fd.append('preview',blob,'preview.png');
-  await api('/api/files/model/preview?name='+enc(name),{method:'POST',body:fd},30000);
+  const suffix=type==='05'?'05':(type==='1'?'1':'');
+  fd.append('preview',blob,'preview'+suffix+'.png');
+  await api('/api/files/model/preview?name='+enc(name)+(type?'&type='+enc(type):''),{method:'POST',body:fd},30000);
   return true;
 };
-const uploadPreviewFromUrl=async(name,url)=>{
+const uploadPreviewFromUrl=async(name,url,type)=>{
   if(!name||!url)return false;
   const r=await fetch(url,{cache:'no-store'});
   if(!r.ok)throw new Error('preview download failed (HTTP '+r.status+')');
@@ -2544,7 +2571,7 @@ const uploadPreviewFromUrl=async(name,url)=>{
     const scale=Math.min(cv.width/img.naturalWidth,cv.height/img.naturalHeight);
     const w=Math.max(1,Math.round(img.naturalWidth*scale)),h=Math.max(1,Math.round(img.naturalHeight*scale));
     ctx.drawImage(img,Math.round((cv.width-w)/2),Math.round((cv.height-h)/2),w,h);
-    await uploadModelPreview(name,await canvasBlob(cv));
+    await uploadModelPreview(name,await canvasBlob(cv),type);
     return true;
   }finally{URL.revokeObjectURL(obj);}
 };
@@ -2772,8 +2799,8 @@ const modelDetails=async(nameEnc,estimate)=>{
   if(!estimate){
     selectedModelConnectPublicId='';
     setText('modelTitle',name); setText('modelLayers','Loading'); setText('modelHeight','-'); setText('modelTime','-');
-    setText('modelSourceLayers','-');
-    show('modelSourceLayersBox',false); show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
+    setText('modelPrintLayers','-');
+    show('modelPrintLayersBox',false); show('modelResinBox',false); show('modelProgress',false); show('previewWrap',false);
     show('modelMlButton',true); show('modelPreviewButton',true);
     show('modelShareButton',connectIsReady());
   } else {
@@ -2785,8 +2812,8 @@ const modelDetails=async(nameEnc,estimate)=>{
     const d=await api('/api/files/model?name='+enc(name)+(estimate?'&estimate=1':''));
     selectedModelConnectPublicId=d.connectPublicId||'';
     setText('modelTitle',d.name); setText('modelLayers',d.layers); setText('modelHeight',Number(d.heightMm).toFixed(2)+' mm'); setText('modelTime',d.estimatedTime);
-    const showSource=d.sourceLayers!==undefined&&Number(d.sourceLayers)!==Number(d.layers);
-    show('modelSourceLayersBox',showSource); if(showSource)setText('modelSourceLayers',d.sourceLayers);
+    const showPrint=d.printLayers!==undefined&&Number(d.printLayers)!==Number(d.layers);
+    show('modelPrintLayersBox',showPrint); if(showPrint)setText('modelPrintLayers',d.printLayers);
     show('modelResinBox',!!d.resinEstimated); if(d.resinEstimated)setText('modelResin',Number(d.resinMl).toFixed(1)+' ml');
     show('modelMlButton',!d.resinEstimated);
     show('modelShareButton',connectIsReady()&&!selectedModelConnectPublicId);
@@ -2801,7 +2828,7 @@ const modelDetails=async(nameEnc,estimate)=>{
 // printer traffic while printing.
 const PREV_W=720,PREV_H=420,PREV_S=4.6,PREV_CX=360,PREV_CY=272;
 const isoPt=(x,y,z)=>({X:PREV_CX+(x-y)*0.866*PREV_S,Y:PREV_CY+(x+y)*0.35*PREV_S-z*0.8*PREV_S});
-let slicesCache={name:'',slices:[],gw:80,gh:60,modelH:0,layers:0};
+let slicesCache={name:'',mode:'',slices:[],gw:80,gh:60,modelH:0,layers:0};
 let lastPrevFrac=-1;
 const loadSavedPreview=async name=>{
   const cv=$('modelPreviewCanvas'),ctx=cv.getContext('2d'),img=new Image();
@@ -2852,7 +2879,7 @@ const drawIso=(cv,doneFrac)=>{
 const saveSlicesToStorage=()=>{
   try{
     const data=slicesCache.slices.map(s=>{let b='';for(let i=0;i<s.length;i++)b+=String.fromCharCode(s[i]);return btoa(b);});
-    localStorage.setItem('tmSlices',JSON.stringify({name:slicesCache.name,gw:slicesCache.gw,gh:slicesCache.gh,modelH:slicesCache.modelH,layers:slicesCache.layers,data:data}));
+    localStorage.setItem('tmSlices',JSON.stringify({name:slicesCache.name,mode:slicesCache.mode,gw:slicesCache.gw,gh:slicesCache.gh,modelH:slicesCache.modelH,layers:slicesCache.layers,data:data}));
   }catch(e){}
 };
 const restoreSlicesFromStorage=name=>{
@@ -2860,18 +2887,22 @@ const restoreSlicesFromStorage=name=>{
     const o=JSON.parse(localStorage.getItem('tmSlices')||'null');
     if(!o||o.name!==name||!o.data||!o.data.length)return false;
     const slices=o.data.map(b64=>{const b=atob(b64);const s=new Uint8Array(b.length);for(let i=0;i<b.length;i++)s[i]=b.charCodeAt(i);return s;});
-    slicesCache={name:o.name,slices:slices,gw:o.gw,gh:o.gh,modelH:o.modelH,layers:o.layers};
+    slicesCache={name:o.name,mode:o.mode||'',slices:slices,gw:o.gw,gh:o.gh,modelH:o.modelH,layers:o.layers};
     return true;
   }catch(e){return false;}
 };
-const fetchSlices=async(name,layers,modelH,btn)=>{
+const fetchSlices=async(name,layers,modelH,btn,mode)=>{
+  mode=mode||'current';
   const N=Math.min(36,layers),gw=80,gh=60,slices=[];
   const oc=document.createElement('canvas');oc.width=gw;oc.height=gh;
   const octx=oc.getContext('2d',{willReadFrequently:true});
   for(let k=0;k<N;k++){
     const li=N>1?1+Math.round(k*(layers-1)/(N-1)):1;
     const img=new Image();
-    img.src='/api/files/layer?name='+enc(name)+'&i='+li;
+    let url='/api/files/layer?name='+enc(name)+'&i='+li;
+    if(mode==='source05')url+='&source=1';
+    else if(mode==='print1')url+='&layer_height=0.10';
+    img.src=url;
     await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('layer '+li+' failed to load'));});
     octx.drawImage(img,0,0,gw,gh);
     const d=octx.getImageData(0,0,gw,gh).data;
@@ -2880,22 +2911,22 @@ const fetchSlices=async(name,layers,modelH,btn)=>{
     slices.push(s);
     if(btn)btn.textContent='Loading '+Math.round(100*(k+1)/N)+'%';
   }
-  slicesCache={name:name,slices:slices,gw:gw,gh:gh,modelH:modelH,layers:layers};
+  slicesCache={name:name,mode:mode,slices:slices,gw:gw,gh:gh,modelH:modelH,layers:layers};
   saveSlicesToStorage();
 };
 const modelPreview=async()=>{
   if(!selectedModel)return;
-  const layers=parseInt($('modelLayers').textContent)||0;
+  const layers=parseInt($('modelPrintLayers').textContent)||parseInt($('modelLayers').textContent)||0;
   if(!layers){msg('Model details are still loading - try again.',true);return;}
   const modelH=parseFloat($('modelHeight').textContent)||layers*0.05;
   const btn=$('modelPreviewButton');btn.disabled=true;
   show('previewWrap',true);
   try{
-    if(slicesCache.name!==selectedModel||!slicesCache.slices.length)
+    if(slicesCache.name!==selectedModel||slicesCache.mode!=='current'||!slicesCache.slices.length)
       await fetchSlices(selectedModel,layers,modelH,btn);
     drawIso($('modelPreviewCanvas'),1);
     const blob=await canvasBlob($('modelPreviewCanvas'));
-    await uploadModelPreview(selectedModel,blob);
+    await uploadModelPreview(selectedModel,blob,statusData&&Number(statusData.layerHeight)>0.06?'1':'05');
   }catch(e){msg(e.message,true);show('previewWrap',false);}
   btn.disabled=false;btn.textContent='Preview 3D';
 };
@@ -2909,6 +2940,14 @@ const connectFetchJson=async path=>{
   if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));
   return j;
 };
+let connectPreviewMode=localStorage.getItem('tmConnectPreviewMode')||'05';
+const setConnectPreviewMode=mode=>{
+  connectPreviewMode=mode==='1'?'1':'05';
+  localStorage.setItem('tmConnectPreviewMode',connectPreviewMode);
+  if($('connectPreview05Button'))$('connectPreview05Button').classList.toggle('active',connectPreviewMode==='05');
+  if($('connectPreview1Button'))$('connectPreview1Button').classList.toggle('active',connectPreviewMode==='1');
+  if(connectIsReady())loadConnectModels(false);
+};
 const connectPostForm=(path,fd,progressCb)=>new Promise((resolve,reject)=>{
   const xhr=new XMLHttpRequest();
   xhr.open('POST',connectApiUrl(path));
@@ -2919,7 +2958,8 @@ const connectPostForm=(path,fd,progressCb)=>new Promise((resolve,reject)=>{
 });
 const connectModelHtml=(m,mine)=>{
   const detail=connectBase()+'/model/'+enc(m.public_id);
-  const preview=m.preview_url?connectBase()+m.preview_url:'';
+  const previewPath=(connectPreviewMode==='1'?m.preview_1_url:m.preview_05_url)||(m.preview_05_url||m.preview_1_url||'');
+  const preview=previewPath?connectBase()+previewPath:'';
   const resin=(m.resin_ml===null||m.resin_ml===undefined)?'-':Number(m.resin_ml).toFixed(2)+' ml';
   const rating=m.rating_count>0?(Number(m.rating_average||0).toFixed(1)+'/5'):'No ratings';
   const localName=connectLocalModels[m.public_id||'']||'';
@@ -2942,7 +2982,7 @@ const connectModelHtml=(m,mine)=>{
   h+='</div></a>';
   h+='<div class="connectActions">';
   if(localName)h+='<button class="small"'+(actionDisabled?' disabled':'')+' onclick="startPrint(\''+enc(localName)+'\')">Print</button>';
-  else h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\',\''+enc(m.original_credits||'')+'\',\''+enc(m.license||'')+'\',\''+enc(m.preview_url||'')+'\',\''+enc(m.resin_ml===null||m.resin_ml===undefined?'':m.resin_ml)+'\',\''+enc(m.layers||'')+'\')">Import</button>';
+  else h+='<button class="small secondaryBtn"'+(actionDisabled?' disabled':'')+' onclick="connectImportModel(\''+enc(m.public_id)+'\',\''+enc(m.model_name||'Model')+'\',\''+enc(m.download_url)+'\',\''+enc(m.original_credits||'')+'\',\''+enc(m.license||'')+'\',\''+enc(m.preview_05_url||'')+'\',\''+enc(m.preview_1_url||'')+'\',\''+enc(m.resin_ml===null||m.resin_ml===undefined?'':m.resin_ml)+'\',\''+enc(m.layers||'')+'\')">Import</button>';
   if(mine){
     // enc(), not esc(): the HTML parser decodes entities inside onclick before
     // the JS runs, so an HTML-escaped quote in server data would still break
@@ -3158,9 +3198,9 @@ const connectModelAction=async(id,action)=>{
   try{await connectPostForm('/api/models/'+enc(id),fd,null);loadConnectModels();}catch(e){msg(e.message,true);}
 };
 window.connectModelAction=connectModelAction;
-const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUrl,resinMl,serverLayers)=>{
+const connectImportModel=async(id,name,downloadUrl,credits,licenseName,preview05Url,preview1Url,resinMl,serverLayers)=>{
   id=decodeURIComponent(id);name=decodeURIComponent(name);downloadUrl=decodeURIComponent(downloadUrl);
-  credits=decodeURIComponent(credits||'');licenseName=decodeURIComponent(licenseName||'');previewUrl=decodeURIComponent(previewUrl||'');resinMl=decodeURIComponent(resinMl||'');
+  credits=decodeURIComponent(credits||'');licenseName=decodeURIComponent(licenseName||'');preview05Url=decodeURIComponent(preview05Url||'');preview1Url=decodeURIComponent(preview1Url||'');resinMl=decodeURIComponent(resinMl||'');
   serverLayers=parseInt(decodeURIComponent(serverLayers||''))||0;
   if(statusData&&statusData.busy){msg('Printer is busy. Import when idle.',true);return;}
   if(statusData&&statusData.sdReady===false){msg('Insert an SD card before importing models.',true);return;}
@@ -3180,11 +3220,15 @@ const connectImportModel=async(id,name,downloadUrl,credits,licenseName,previewUr
     const done=await uploadModelPayload(blob,safeName,$('statusMsg'),meta);
     const finalName=done&&done.name?done.name:name;
     let previewError='';
-    if(previewUrl){
-      const previewFull=previewUrl.indexOf('http')===0?previewUrl:connectBase()+previewUrl;
-      try{await uploadPreviewFromUrl(finalName,previewFull);}catch(e){previewError=e.message;}
+    if(preview05Url){
+      const previewFull=preview05Url.indexOf('http')===0?preview05Url:connectBase()+preview05Url;
+      try{await uploadPreviewFromUrl(finalName,previewFull,'05');}catch(e){previewError=e.message;}
     }
-    const sourceLayers=Number(done&&done.sourceLayers)||0,printLayers=Number(done&&done.layers)||0;
+    if(preview1Url){
+      const previewFull=preview1Url.indexOf('http')===0?preview1Url:connectBase()+preview1Url;
+      try{await uploadPreviewFromUrl(finalName,previewFull,'1');}catch(e){previewError=previewError||e.message;}
+    }
+    const sourceLayers=Number(done&&done.layers)||Number(done&&done.sourceLayers)||0,printLayers=Number(done&&done.printLayers)||0;
     let note='';
     if(sourceLayers&&printLayers&&sourceLayers!==printLayers)note+=' Source: '+sourceLayers+' layers; current print setting uses '+printLayers+' layers.';
     if(serverLayers&&sourceLayers&&serverLayers!==sourceLayers)note+=' Server listed '+serverLayers+' layers.';
@@ -3213,10 +3257,14 @@ const zipHeader=(sig,fn,crc,size,offset,central)=>{
   if(central){zipU16(a,0);zipU16(a,0);zipU16(a,0);zipU32(a,0);zipU32(a,offset);}
   return new Uint8Array(a);
 };
-const zipModelLayers=async(name,layers,progressCb)=>{
+const zipModelLayers=async(name,layers,progressCb,mode)=>{
+  mode=mode||'current';
   const encText=new TextEncoder(),parts=[],central=[];let offset=0,centralSize=0;
   for(let i=1;i<=layers;i++){
-    const r=await fetch('/api/files/layer?name='+enc(name)+'&i='+i,{cache:'no-store'});
+    let url='/api/files/layer?name='+enc(name)+'&i='+i;
+    if(mode==='source05')url+='&source=1';
+    else if(mode==='print1')url+='&layer_height=0.10';
+    const r=await fetch(url,{cache:'no-store'});
     if(!r.ok)throw new Error('layer '+i+' failed');
     const data=await r.arrayBuffer(),fn=encText.encode(i+'.png'),crc=crc32(data),size=data.byteLength;
     const local=zipHeader(0x04034b50,fn,crc,size,offset,false);
@@ -3240,19 +3288,28 @@ const shareModel=async name=>{
   setConnectTab('models');
   openView('connect');show('connectPublishBox',true);$('shareUploadButton').classList.add('hidden');$('shareUploadButton').disabled=true;
   $('shareModelName').value=name;$('shareCredits').value='';$('shareLicense').value='CC-BY-NC';
-  shareState={sdName:name,details:null,archive:null,preview:null};
+  shareState={sdName:name,details:null,archive:null,preview:null,preview05:null,preview1:null};
   try{
     shareSet('1. Calculating ml...',10);
     const d=await api('/api/files/model?name='+enc(name)+'&estimate=1',null,120000);
     shareState.details=d;
-    shareSet('2. Making preview image...',25);
-    const modelH=Number(d.heightMm)||d.layers*0.05;
-    if(slicesCache.name!==name||!slicesCache.slices.length)await fetchSlices(name,d.layers,modelH,null);
+    const sourceLayers=Number(d.sourceLayers)||Number(d.layers)||0;
+    if(!sourceLayers)throw new Error('model has no source layers');
+    const printLayers1=Math.max(1,Math.floor(sourceLayers/2));
+    shareSet('2. Making 0.05 mm preview...',20);
+    const modelH05=sourceLayers*0.05;
+    await fetchSlices(name,sourceLayers,modelH05,null,'source05');
     show('connectPreviewCanvas',true);drawIso($('connectPreviewCanvas'),1);
-    shareState.preview=await canvasBlob($('connectPreviewCanvas'));
-    await uploadModelPreview(name,shareState.preview);
+    shareState.preview05=await canvasBlob($('connectPreviewCanvas'));
+    await uploadModelPreview(name,shareState.preview05,'05');
+    shareSet('2. Making 0.10 mm preview...',28);
+    await fetchSlices(name,printLayers1,printLayers1*0.1,null,'print1');
+    drawIso($('connectPreviewCanvas'),1);
+    shareState.preview1=await canvasBlob($('connectPreviewCanvas'));
+    await uploadModelPreview(name,shareState.preview1,'1');
+    shareState.preview=(statusData&&Number(statusData.layerHeight)>0.06)?shareState.preview1:shareState.preview05;
     shareSet('3. Preparing model for upload...',35);
-    shareState.archive=await zipModelLayers(name,d.layers,(i,n)=>shareSet('3. Preparing model for upload... '+i+' / '+n,35+Math.round(55*i/n)));
+    shareState.archive=await zipModelLayers(name,sourceLayers,(i,n)=>shareSet('3. Preparing model for upload... '+i+' / '+n,35+Math.round(55*i/n)),'source05');
     shareSet('4. Done. Review the details, then upload.',100);
     $('shareUploadButton').classList.remove('hidden');$('shareUploadButton').disabled=false;
   }catch(e){shareSet(e.message,null);msg(e.message,true);}
@@ -3264,10 +3321,12 @@ const uploadSharedModel=async()=>{
   const d=shareState.details,fd=new FormData();
   fd.append('publish_token',connectConfig.connectPublishToken);
   fd.append('model_name',modelName);fd.append('original_credits',$('shareCredits').value.trim());
+  const sourceLayers=Number(d.sourceLayers)||Number(d.layers)||0;
   fd.append('license',$('shareLicense').value.trim()||'CC-BY-NC');
-  fd.append('layers',d.layers);fd.append('height_mm',d.heightMm);if(d.resinEstimated)fd.append('resin_ml',d.resinMl);
+  fd.append('layers',sourceLayers);fd.append('height_mm',(sourceLayers*0.05).toFixed(2));if(d.resinEstimated)fd.append('resin_ml',d.resinMl);
   fd.append('archive',shareState.archive,modelName.replace(/[^A-Za-z0-9_.-]/g,'_')+'.zip');
-  if(shareState.preview)fd.append('preview',shareState.preview,'preview.png');
+  if(shareState.preview05)fd.append('preview05',shareState.preview05,'preview05.png');
+  if(shareState.preview1)fd.append('preview1',shareState.preview1,'preview1.png');
   $('shareUploadButton').disabled=true;
   try{
     shareSet('6. Uploading...',0);
@@ -3319,7 +3378,8 @@ const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||e
       if(slicesCache.name!==name||!slicesCache.slices.length){
         msg('Preparing 3D progress preview...');
         const d=await api('/api/files/model?name='+enc(name));
-        await fetchSlices(name,d.layers,Number(d.heightMm)||d.layers*0.05,null);
+        const layers=Number(d.printLayers)||Number(d.layers)||0;
+        await fetchSlices(name,layers,Number(d.heightMm)||layers*0.05,null);
       }
     }catch(e){}
   }
@@ -3469,6 +3529,9 @@ $('updateViewButton').addEventListener('click',()=>openView('update'));
 $('connectModelsTabButton').addEventListener('click',()=>setConnectTab('models'));
 $('connectBootAnimsTabButton').addEventListener('click',()=>setConnectTab('boot'));
 $('connectLeaderboardTabButton').addEventListener('click',()=>setConnectTab('leaderboard'));
+$('connectPreview05Button').addEventListener('click',()=>setConnectPreviewMode('05'));
+$('connectPreview1Button').addEventListener('click',()=>setConnectPreviewMode('1'));
+setConnectPreviewMode(connectPreviewMode);
 $('modelBackButton').addEventListener('click',()=>openView('home'));
 $('connectSetupButton').addEventListener('click',async()=>{
   openView('config');

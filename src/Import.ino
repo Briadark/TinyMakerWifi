@@ -215,7 +215,7 @@ bool writeModelMetadataFile(const String &destDir, const String &name,
   f.print(summary.sourceLayers);
   f.print(",\n");
   f.print("  \"layers\": ");
-  f.print(summary.printLayers);
+  f.print(summary.sourceLayers);
   f.print(",\n");
   f.print("  \"height_mm\": ");
   f.print(String(summary.heightMm, 2));
