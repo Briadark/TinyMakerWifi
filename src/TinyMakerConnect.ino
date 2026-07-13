@@ -558,6 +558,14 @@ void handleApiConnectRegister() {
 
 void handleApiConnectRecoveryCode() {
   if (rejectIfWebControlOff()) return;
+  if (connectRecoveryCode.length() == 0 && connectPublishToken.length() > 0) {
+    if (printerBusy()) {
+      sendApiError(409, "printer busy");
+      return;
+    }
+    String message;
+    tinymakerConnectRegister(message);
+  }
   if (connectRecoveryCode.length() == 0) {
     sendApiError(404, "recovery code is not available");
     return;
