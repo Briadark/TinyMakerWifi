@@ -2140,9 +2140,9 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "#configView,#updateView,#modelPanel,#dryRunBanner,#webControlBanner{max-width:900px;margin-left:auto;margin-right:auto}"
     ".configGrid{grid-template-columns:repeat(3,minmax(0,1fr))}"
     "#cfgPair{display:grid;grid-template-columns:1fr 1fr;gap:12px}#cfgPair .card{margin:12px 0 0}"
-    "#modelPanel:has(#previewWrap:not(.hidden)){max-width:none;display:grid;grid-template-columns:1fr 1fr;column-gap:18px;align-items:start}"
-    "#modelPanel:has(#previewWrap:not(.hidden)) #modelBackButton,#modelPanel:has(#previewWrap:not(.hidden)) #modelTitle{grid-column:1/-1}"
-    "#modelPanel:has(#previewWrap:not(.hidden)) #previewWrap{grid-column:2;grid-row:3/span 6;margin-top:0}}"
+    "#modelPanel:not(.hidden):has(#previewWrap:not(.hidden)){max-width:none;display:grid;grid-template-columns:1fr 1fr;column-gap:18px;align-items:start}"
+    "#modelPanel:not(.hidden):has(#previewWrap:not(.hidden)) #modelBackButton,#modelPanel:not(.hidden):has(#previewWrap:not(.hidden)) #modelTitle{grid-column:1/-1}"
+    "#modelPanel:not(.hidden):has(#previewWrap:not(.hidden)) #previewWrap{grid-column:2;grid-row:3/span 6;margin-top:0}}"
     "</style></head><body><main class='wrap'>"));
   server.sendContent_P(bodyBeforeFw);
   server.sendContent(fw);
