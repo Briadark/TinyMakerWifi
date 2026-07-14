@@ -1798,7 +1798,7 @@ void handleRootPage() {
     "unknown";
 #endif
   static const char rootBodyBeforeFw[] PROGMEM = R"SPA(
-<div class='head'><div><h1>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
+<div class='head'><div><h1><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='26' height='26' style='vertical-align:-4px;margin-right:8px'><rect x='8' y='40' width='48' height='9' rx='3' fill='#e8720c'/><rect x='14' y='27' width='36' height='9' rx='3' fill='#e8720c' opacity='.75'/><rect x='20' y='14' width='24' height='9' rx='3' fill='#e8720c' opacity='.5'/><path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='#4da3ff' stroke-width='5' stroke-linecap='round'/></svg>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
   // data-build bakes the page's own build tag in, so a stale page left open in
   // a tab reloads itself as soon as a status poll reports a different build.
   static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span><span id='fwBuild' class='fwbuild' data-build=")SPA"
@@ -2270,7 +2270,9 @@ const applyStatus=s=>{
     $('disableDryRunButton').disabled=!!s.busy;
     $('disableDryRunButton').textContent=s.busy?'Disable when idle':'Press here to disable';
     ['printLayerBox','printResinBox','printRunBox','printRemainingBox','printControls'].forEach(id=>show(id,s.busy));
-    show('sdSection',!s.busy);   // an empty, disabled SD manager mid-print is just noise
+    // Keep the SD manager card visible mid-print (user preference over the
+    // 0.13.4 hide): the last-known list stays on screen, locked - no fresh
+    // /api/files calls while printing (SD is busy feeding layers).
     // firmware actions lock the moment a print starts, even mid-visit
     if(s.busy)['updInstallLatest','updInstallSelected','updUploadButton','updFile','updVersionSelect'].forEach(id=>$(id).disabled=true);
     // 3D print progress: reuses slices prefetched before the start (or by an
@@ -2345,13 +2347,14 @@ const renderFiles=()=>{
   if(filesPage>=pages)filesPage=pages-1;
   if(filesPage<0)filesPage=0;
   const slice=items.slice(filesPage*FILES_PER_PAGE,(filesPage+1)*FILES_PER_PAGE);
-  const dis=(statusData&&statusData.webControl===false)?' disabled':'';
-  let h='';
-  if(!slice.length)h='<div class="hint">'+(q?'No models match the filter.':'No printable model folders or SL1/ZIP archives found.')+'</div>';
+  const dis=(statusData&&(statusData.webControl===false||statusData.busy))?' disabled':'';
+  const busy=!!(statusData&&statusData.busy);
+  let h=busy?'<div class="hint warn">Locked while printing.</div>':'';
+  if(!slice.length)h+='<div class="hint">'+(q?'No models match the filter.':(busy?'SD contents load after the print finishes.':'No printable model folders or SL1/ZIP archives found.'))+'</div>';
   slice.forEach(it=>{
     const meta=it.type==='model'?'Model folder':'Archive - '+formatBytes(it.sizeBytes);
     h+='<div class="file"><div><strong>'+esc(it.name)+'</strong><div class="meta">'+esc(meta)+'</div></div><div class="rowActions">';
-    if(it.type==='model')h+='<button class="small secondaryBtn" onclick="modelDetails(\''+enc(it.name)+'\',false)">Details</button><button class="small"'+dis+' onclick="startPrint(\''+enc(it.name)+'\')">Start</button>';
+    if(it.type==='model')h+='<button class="small secondaryBtn"'+dis+' onclick="modelDetails(\''+enc(it.name)+'\',false)">Details</button><button class="small"'+dis+' onclick="startPrint(\''+enc(it.name)+'\')">Start</button>';
     h+='<button class="delete"'+dis+' onclick="deleteFile(\''+enc(it.name)+'\')">Delete</button></div></div>';
   });
   if(pages>1)h+='<div class="rowActions" style="justify-content:center;margin-top:10px"><button class="small secondaryBtn"'+(filesPage===0?' disabled':'')+' onclick="filesNav(-1)">&laquo; Prev</button><span class="meta">'+(filesPage+1)+' / '+pages+'</span><button class="small secondaryBtn"'+(filesPage+1>=pages?' disabled':'')+' onclick="filesNav(1)">Next &raquo;</button></div>';
@@ -2360,7 +2363,7 @@ const renderFiles=()=>{
 };
 const loadFiles=async()=>{
   const list=$('filesList');
-  if(statusData&&statusData.busy){list.innerHTML='<div class="hint warn">SD manager actions are disabled while printing.</div>';show('filesFilter',false);return;}
+  if(statusData&&statusData.busy){renderFiles();show('filesFilter',false);return;} // no SD reads mid-print; show the cached list, locked
   try{
     const d=await api('/api/files');
     updateSdUsage(d);
@@ -2789,8 +2792,8 @@ $('configForm').addEventListener('submit',async e=>{e.preventDefault();try{await
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!await uiConfirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?',{danger:true}))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset MQTT settings?',{danger:true}))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configConnectResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset TinyMaker Connect settings and forget this printer token?',{danger:true}))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
-$('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
-$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectTestButton').addEventListener('click',async()=>{msg('Testing the Connect server...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;msg(updating?'Updating the Connect registration...':'Registering with TinyMaker Connect...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('backupDownloadButton').addEventListener('click',async()=>{try{const r=await fetch('/api/config/backup',{cache:'no-store'});if(!r.ok)throw new Error('backup failed (HTTP '+r.status+')');const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tinymaker-backup.json';a.click();URL.revokeObjectURL(a.href);msg('Backup downloaded.');}catch(e){msg(e.message,true);}});
 $('backupSdButton').addEventListener('click',async()=>{try{const r=await api('/api/config/backup/sd',{method:'POST'});msg(r.message||'Backup saved to SD.');loadConfig();}catch(e){msg(e.message,true);}});
 $('restoreButton').addEventListener('click',()=>$('restoreFile').click());
@@ -2844,7 +2847,7 @@ $('themeBtn').addEventListener('click',e=>{e.preventDefault();const toLight=docu
 applyThemeLink();
 $('helpClose').addEventListener('click',()=>show('helpModal',false));
 $('helpModal').addEventListener('click',e=>{if(e.target===$('helpModal'))show('helpModal',false);});
-$('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('tgTestButton').addEventListener('click',async()=>{msg('Sending a test message...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
@@ -3611,12 +3614,9 @@ void wifiInfoValues() {
     gfx2->print(r);
     gfx2->print(" dBm ");
     gfx2->print(r > -60 ? "(Good)" : (r > -75 ? "(OK)" : "(Weak)"));
-    // Same green strength bars as the main-menu badge/dashboard: RSSI
-    // > -60 = 3 bars, > -75 = 2, else 1; unlit bars stay dark grey.
-    int n = r > -60 ? 3 : (r > -75 ? 2 : 1);
-    gfx2->fillRect(142, 31, 3, 4,  n >= 1 ? GREEN : DARKGREY);
-    gfx2->fillRect(147, 27, 3, 8,  n >= 2 ? GREEN : DARKGREY);
-    gfx2->fillRect(152, 23, 3, 12, n >= 3 ? GREEN : DARKGREY);
+    // No strength bars here: the dBm + word already say it, and the bars
+    // collided with the "(Good)" text (user finding, 0.14.3). The main-menu
+    // badge keeps its bars.
     gfx2->setCursor(5, 55);
     gfx2->print("IP: ");
     gfx2->print(WiFi.localIP());
