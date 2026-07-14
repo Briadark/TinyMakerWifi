@@ -128,6 +128,7 @@ bool waEnabled = false;             // WhatsApp notifications via CallMeBot (one
 String waPhone = "";                // phone with country code
 String waApiKey = "";               // CallMeBot key (secret - never echoed to browser)
 bool statsPingEnabled = true;       // anonymous install ping (MAC hash + version + print hours)
+uint8_t prevRegularExposure = 0;    // last replaced Regular exposure (0 = none) - dashboard Undo
 unsigned long lastUiActivityMs = 0;
 bool uiBlanked = false;
 
@@ -158,6 +159,7 @@ void loadDeviceConfig() {
   webDashboardEnabled = sysPrefs.getBool("webDash", true);
   bootUpdateCheckEnabled = sysPrefs.getBool("bootUpdChk", true);
   statsPingEnabled = sysPrefs.getBool("statsPing", true);
+  prevRegularExposure = sysPrefs.getUChar("prevRegExp", 0);
   bootAnimName = sysPrefs.getString("bootAnimName", "");
   mqttEnabled = sysPrefs.getBool("mqttEnabled", false);
   mqttHost = sysPrefs.getString("mqttHost", "");
@@ -401,6 +403,18 @@ void savePrintSettings() {
   EEPROM.write(10, Drop_Back_Feedrate);
   EEPROM.write(11, Vat_Capacity_Ml);
   EEPROM.commit();
+}
+
+// Safety net for a bad calibration: whenever Regular exposure is REPLACED
+// (exposure-test pick or a dashboard config save - not the +-1 LCD steps),
+// the old value is remembered so the dashboard can offer a one-click Undo.
+// Undo goes through the same path, so undo-of-undo swaps back.
+void rememberPrevRegularExposure(long oldVal) {
+  if (oldVal <= 0 || oldVal > 30 || oldVal == Regular_Exposure) return;
+  prevRegularExposure = (uint8_t)oldVal;
+  sysPrefs.begin("tinymaker", false);
+  sysPrefs.putUChar("prevRegExp", prevRegularExposure);
+  sysPrefs.end();
 }
 
 // ===================================================================================

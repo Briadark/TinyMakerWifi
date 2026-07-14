@@ -2132,8 +2132,10 @@ void expTestApplyPick(){
   int t = expTestBarSecs(expTestPick <= 8 ? expTestPick : (expTestPick == 9 ? 1 : 8));
   if (t < 1) t = 1;
   if (t > 30) t = 30;
+  long oldR = Regular_Exposure;
   Regular_Exposure = t;
   savePrintSettings();
+  rememberPrevRegularExposure(oldR);
   uiFrame(ORANGE);
   gfx2->setFont(&FreeSans8pt7b);
   gfx2->setTextColor(WHITE);

@@ -144,6 +144,17 @@ bool sdCardUsage(uint64_t &totalBytes, uint64_t &freeBytes) {
   return totalBytes > 0;
 }
 
+// SD-backup presence cache for /api/config (see configJson).
+bool sdBackupCacheValid = false;
+bool sdBackupCachePresent = false;
+uint32_t sdBackupCacheEpoch = 0;
+
+void refreshSdBackupCache() {
+  sdBackupCachePresent = sdCardReady() && sdBackupExists();
+  sdBackupCacheEpoch = sdBackupCachePresent ? sdBackupSavedEpoch() : 0;
+  sdBackupCacheValid = true;
+}
+
 // Streaming part - called repeatedly with chunks of the multipart body
 void handleUploadData() {
   HTTPUpload &up = server.upload();
@@ -898,6 +909,8 @@ String configJson() {
   out += String(Base_Exposure);
   out += ",\"regularExposure\":";
   out += String(Regular_Exposure);
+  out += ",\"prevRegularExposure\":";
+  out += String(prevRegularExposure);
   out += ",\"baseLayers\":";
   out += String(Base_Layer);
   out += ",\"transitionLayers\":";
@@ -949,11 +962,15 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
-  bool sdBk = !printerBusy() && sdCardReady() && sdBackupExists();
+  // Cached: the dashboard polls /api/config and the three SD opens per
+  // request (ready + exists + epoch) added up. Refreshed lazily once and
+  // after every Backup-to-SD write.
+  if (!sdBackupCacheValid && !printerBusy()) refreshSdBackupCache();
+  bool sdBk = !printerBusy() && sdBackupCachePresent;
   out += ",\"sdBackupPresent\":";
   out += sdBk ? "true" : "false";
   out += ",\"sdBackupEpoch\":";
-  out += String(sdBk ? sdBackupSavedEpoch() : 0);
+  out += String(sdBk ? sdBackupCacheEpoch : 0);
   out += tinymakerConnectConfigJson();
   out += tinymakerTelegramConfigJson();
   out += tinymakerWhatsAppConfigJson();
@@ -964,7 +981,9 @@ void applyConfigRequest() {
   float requestedLayer = server.hasArg("layer_height") ? server.arg("layer_height").toFloat() : Layer_Height;
   Layer_Height = requestedLayer < 0.075 ? 0.05 : 0.10;
   Base_Exposure = formLong("base_exposure", Base_Exposure, 10, 60);
+  long oldRegular = Regular_Exposure;
   Regular_Exposure = formLong("regular_exposure", Regular_Exposure, 1, 30);
+  rememberPrevRegularExposure(oldRegular);   // no-op unless it actually changed
   Base_Layer = formLong("base_layer", Base_Layer, 1, 8);
   Transition_Layer = formLong("transition_layer", Transition_Layer, 0, 10);
   Slow_Lift_Distance = formLong("slow_lift_distance", Slow_Lift_Distance, 1, 3);
@@ -1067,6 +1086,7 @@ void handleApiConfigBackupSd() {
     sendApiError(500, "could not write the backup to SD");
     return;
   }
+  refreshSdBackupCache();
   sendApiOk("\"message\":\"Backup saved to SD (tinymaker-backup.json).\"");
 }
 
@@ -1830,7 +1850,7 @@ void handleRootPage() {
 
 <div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div class='modalBtns'><button id='confirmCancel' class='button secondary' type='button'>Cancel</button><button id='confirmOk' type='button'>OK</button></div></div></div>
 
-<div id='helpModal' class='modal hidden'><div class='modalCard'><div id='helpBody' style='color:var(--text);font-size:15px;line-height:1.5'></div><div class='modalBtns'><button id='helpClose' type='button'>Close</button></div></div></div>
+<div id='helpModal' class='modal hidden'><div class='modalCard'><div id='helpBody' style='color:var(--text);font-size:15px;line-height:1.5;margin-bottom:18px'></div><div class='modalBtns'><button id='helpClose' type='button'>Close</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -1967,7 +1987,7 @@ void handleRootPage() {
   <div class='configGrid'>
     <label><span>Layer height (mm)<a href='#' class='qHelp' data-help='layer'>?</a></span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
     <label><span>Base exposure (s)</span><input name='base_exposure' id='cfgBaseExposure' type='number' min='10' max='60' step='1'></label>
-    <label><span>Regular exposure (s)</span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
+    <label><span>Regular exposure (s) <a href='#' id='undoRegExp' class='hidden'></a></span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
     <label><span>Base layers</span><input name='base_layer' id='cfgBaseLayers' type='number' min='1' max='8' step='1'></label>
     <label><span>Transition layers</span><input name='transition_layer' id='cfgTransitionLayers' type='number' min='0' max='10' step='1'></label>
     <label><span>Slow lift distance (mm)</span><input name='slow_lift_distance' id='cfgSlowLiftDistance' type='number' min='1' max='3' step='1'></label>
@@ -2507,12 +2527,8 @@ const modelPreview=async()=>{
 const connectIsReady=()=>!!(connectConfig&&connectConfig.connectEnabled&&connectConfig.connectPrinterPublicId&&connectConfig.connectPublishToken);
 const connectBase=()=>String((connectConfig&&connectConfig.connectBaseUrl)||'https://tinymaker.inductie.nu').replace(/\/+$/,'');
 const connectApiUrl=path=>connectBase()+path;
-const connectFetchJson=async path=>{
-  const r=await fetch(connectApiUrl(path),{cache:'no-store'});
-  let j={};try{j=await r.json();}catch(e){}
-  if(!r.ok||j.ok===false)throw new Error(j.error||('HTTP '+r.status));
-  return j;
-};
+// api() with a timeout - a hung Connect server used to spin "Loading" forever.
+const connectFetchJson=path=>api(connectApiUrl(path),null,15000);
 const connectPostForm=(path,fd,progressCb)=>new Promise((resolve,reject)=>{
   const xhr=new XMLHttpRequest();
   xhr.open('POST',connectApiUrl(path));
@@ -2771,6 +2787,11 @@ const loadConfig=async()=>{
     const c=await api('/api/config');
     connectConfig=c;
     $('cfgLayerHeight').value=Number(c.layerHeight).toFixed(2); $('cfgBaseExposure').value=c.baseExposure; $('cfgRegularExposure').value=c.regularExposure; $('cfgBaseLayers').value=c.baseLayers; $('cfgTransitionLayers').value=c.transitionLayers;
+    // One-click undo of the last replaced exposure (test pick / config save)
+    const prevR=Number(c.prevRegularExposure)||0;
+    show('undoRegExp',prevR>0&&prevR!==Number(c.regularExposure));
+    $('undoRegExp').textContent='Undo ('+prevR+'s)';
+    $('undoRegExp').dataset.v=prevR;
     $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled; $('cfgBootUpdateCheck').checked=!!c.bootUpdateCheck; $('cfgStatsPing').checked=!!c.statsPing;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
@@ -2825,6 +2846,7 @@ $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
+$('undoRegExp').addEventListener('click',async e=>{e.preventDefault();const v=Number(e.target.dataset.v)||0;if(!v)return;$('cfgRegularExposure').value=v;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});msg('Regular exposure back to '+v+'s.');loadConfig();}catch(err){msg(err.message,true);}});
 $('ntfNone').addEventListener('change',updateTgFields);
 $('ntfTg').addEventListener('change',updateTgFields);
 $('ntfWa').addEventListener('change',updateTgFields);
