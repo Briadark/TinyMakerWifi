@@ -2398,7 +2398,10 @@ const FILES_PER_PAGE=12;
 const renderFiles=()=>{
   const list=$('filesList');
   const q=filesQuery.toLowerCase();
-  const items=q?filesItems.filter(it=>it.name.toLowerCase().indexOf(q)>=0):filesItems;
+  // Stable A-Z order (models first, then archives) - the raw list follows
+  // SD/FAT directory order, which reshuffles after deletes.
+  const sorted=filesItems.slice().sort((a,b)=>a.type!==b.type?(a.type==='model'?-1:1):a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
+  const items=q?sorted.filter(it=>it.name.toLowerCase().indexOf(q)>=0):sorted;
   const pages=Math.max(1,Math.ceil(items.length/FILES_PER_PAGE));
   if(filesPage>=pages)filesPage=pages-1;
   if(filesPage<0)filesPage=0;
@@ -2413,6 +2416,8 @@ const renderFiles=()=>{
     if(it.type==='model')h+='<button class="small secondaryBtn"'+dis+' onclick="modelDetails(\''+enc(it.name)+'\',false)">Details</button><button class="small"'+dis+' onclick="startPrint(\''+enc(it.name)+'\')">Start</button>';
     h+='<button class="delete"'+dis+' onclick="deleteFile(\''+enc(it.name)+'\')">Delete</button></div></div>';
   });
+  const nModels=items.filter(it=>it.type==='model').length,nArch=items.length-nModels;
+  if(items.length>3)h+='<div class="meta" style="margin-top:10px">'+nModels+' model'+(nModels===1?'':'s')+(nArch?' · '+nArch+' archive'+(nArch===1?'':'s'):'')+'</div>';
   if(pages>1)h+='<div class="rowActions" style="justify-content:center;margin-top:10px"><button class="small secondaryBtn"'+(filesPage===0?' disabled':'')+' onclick="filesNav(-1)">&laquo; Prev</button><span class="meta">'+(filesPage+1)+' / '+pages+'</span><button class="small secondaryBtn"'+(filesPage+1>=pages?' disabled':'')+' onclick="filesNav(1)">Next &raquo;</button></div>';
   if(filesHidden>0)h+='<div class="hint">'+filesHidden+' other SD item(s) hidden.</div>';
   list.innerHTML=h;
