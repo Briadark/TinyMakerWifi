@@ -1822,7 +1822,16 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     // column full-height (cards used to auto-flow and overlap oddly mid-print).
     "#homeLeft{display:grid;gap:14px}"
     "#homeView .card{margin:0}"
-    "#modelPanel,#connectView,#configView,#updateView,#dryRunBanner,#webControlBanner{max-width:760px;margin-left:auto;margin-right:auto}}"
+    // Non-dashboard views used to sit in a narrow 760px band with big empty
+    // margins (user finding). Connect goes full width (its tiles auto-fill);
+    // the rest widen to 900 with three-column form fields, and the model
+    // panel splits info | 3D preview once the preview is open.
+    "#configView,#updateView,#modelPanel,#dryRunBanner,#webControlBanner{max-width:900px;margin-left:auto;margin-right:auto}"
+    ".configGrid{grid-template-columns:repeat(3,minmax(0,1fr))}"
+    "#cfgPair{display:grid;grid-template-columns:1fr 1fr;gap:12px}#cfgPair .card{margin:12px 0 0}"
+    "#modelPanel:has(#previewWrap:not(.hidden)){max-width:none;display:grid;grid-template-columns:1fr 1fr;column-gap:18px;align-items:start}"
+    "#modelPanel:has(#previewWrap:not(.hidden)) #modelBackButton,#modelPanel:has(#previewWrap:not(.hidden)) #modelTitle{grid-column:1/-1}"
+    "#modelPanel:has(#previewWrap:not(.hidden)) #previewWrap{grid-column:2;grid-row:3/span 6;margin-top:0}}"
     "</style></head><body><main class='wrap'>"));
   server.sendContent_P(bodyBeforeFw);
   server.sendContent(fw);
@@ -2089,6 +2098,7 @@ void handleRootPage() {
   <button id='configSaveButton' type='submit'>Save config</button>
   </div>
   </form>
+  <div id='cfgPair'>
   <div class='card'>
   <h2>Boot animation</h2>
   <div id='bootAnimList'></div>
@@ -2106,6 +2116,7 @@ void handleRootPage() {
   <div id='backupHint' class='hint'>The backup holds every setting and the lifetime counters. With a backup on the SD card, the printer offers to restore it on the first boot after a full USB reflash.</div>
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
   <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
+  </div>
   </div>
   <div id='configHint' class='hint'>Config locks automatically while printing.</div>
 </section>
