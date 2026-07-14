@@ -293,7 +293,11 @@ String otaStyledPage(const String &inner) {
     "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
     "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
     "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
-    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
     "<style>"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
@@ -1706,7 +1710,11 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
     "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
     "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
-    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
     // Theme boot: apply the saved choice to <html> BEFORE the stylesheet
     // parses, so a light-theme reload never flashes dark (manual does the same).
     "<script>(function(){try{if(localStorage.getItem('tmTheme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}})()</script>"
@@ -3494,7 +3502,11 @@ void network_setup() {
       "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
       "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
       "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
-      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/></svg>\">"
+      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
       "<style>button{background:#e8720c;border:0}button:hover,button:focus{background:#c95f06}"
       "a,a:visited{color:#4da3ff}</style>");
     wm.setCustomMenuHTML(
