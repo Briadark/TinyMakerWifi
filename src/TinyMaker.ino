@@ -530,6 +530,7 @@ String buildConfigBackupJson(bool includeSecrets = true) {
   if (includeSecrets) {
     out += ",\"tgToken\":\"";
     out += backupEscape(tgToken);
+    out += "\"";
   }
   out += ",\"tgChat\":\"";
   out += backupEscape(tgChat);

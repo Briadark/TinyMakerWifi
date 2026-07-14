@@ -3007,10 +3007,15 @@ const modelPreview=async()=>{
   btn.disabled=false;btn.textContent='Preview 3D';
 };
 
-const connectIsReady=()=>!!(connectConfig&&connectConfig.connectEnabled&&connectConfig.connectPrinterPublicId&&connectConfig.connectPublishToken);
+const connectIsReady=()=>!!(connectConfig&&connectConfig.connectEnabled&&connectConfig.connectPrinterPublicId&&connectConfig.connectTokenSet);
 const connectBase=()=>String((connectConfig&&connectConfig.connectBaseUrl)||'https://connect.tinymakerwifi.com').replace(/\/+$/,'');
 let connectAppPromise=null;
 const loadConnectApp=()=>{
+  if(!connectIsReady()){
+    const root=$('connectHostedRoot');
+    if(root)root.innerHTML='<h2>TinyMaker Connect</h2><div class="hint">Enable and register TinyMaker Connect in Settings before loading the hosted Connect app.</div>';
+    return Promise.reject(new Error('TinyMaker Connect is not registered.'));
+  }
   if(window.TinyMakerConnectHostedReady)return Promise.resolve();
   if(connectAppPromise)return connectAppPromise;
   const root=$('connectHostedRoot');
@@ -3127,7 +3132,7 @@ const updateTgFields=()=>{show('tgFields',$('ntfTg').checked);show('waFields',$(
 const updateConnectView=c=>{
   c=c||connectConfig||{};
   if(window.TinyMakerConnectHostedUpdate)window.TinyMakerConnectHostedUpdate(c);
-  else if($('connectHostedRoot'))$('connectHostedRoot').innerHTML='<h2>TinyMaker Connect</h2><div class="hint">Connect UI is loaded from '+esc(connectBase())+'.</div>';
+  else if($('connectHostedRoot'))$('connectHostedRoot').innerHTML=connectIsReady()?'<h2>TinyMaker Connect</h2><div class="hint">Connect UI is loaded from '+esc(connectBase())+'.</div>':'<h2>TinyMaker Connect</h2><div class="hint">Enable and register TinyMaker Connect in Settings before loading the hosted Connect app.</div>';
   show('modelShareButton',connectIsReady()&&!!selectedModel&&!selectedModelConnectPublicId);
 };
 const loadConfig=async()=>{
@@ -3163,10 +3168,10 @@ const loadConfig=async()=>{
     updateNetworkFields();updateMqttFields();updateConnectFields();updateTgFields();
     show('configMqttResetButton',!!c.mqttConfigured);
     show('configConnectResetButton',!!c.connectConfigured);
-    // The Connect tab exists only while Connect is enabled in Settings -
-    // otherwise it dead-ends on a lone unchecked "Enable" box and confuses.
-    show('connectViewButton',!!c.connectEnabled);
-    if(!c.connectEnabled&&!$('connectView').classList.contains('hidden'))openView('home');
+    // The hosted Connect tab exists only after registration, so an
+    // unconfigured printer never injects remote Connect JavaScript.
+    show('connectViewButton',connectIsReady());
+    if(!connectIsReady()&&!$('connectView').classList.contains('hidden'))openView('home');
     $('configDefaultsButton').textContent=(c.mqttConfigured||c.connectConfigured)?'Reset to defaults (Excluding integrations)':'Reset to defaults';
     const noWc=!c.webDashboardEnabled;
     const locked=!!c.locked||configIsLocallyLocked()||noWc;
