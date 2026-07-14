@@ -130,6 +130,13 @@ uint32_t connectBackupEpoch = 0;
 bool tgEnabled = false;             // Telegram outbound notifications (V1)
 String tgToken = "";                // bot token (secret - never echoed to browser)
 String tgChat = "";                 // chat id to notify
+bool waEnabled = false;             // WhatsApp notifications via CallMeBot (one channel at a time)
+String waPhone = "";                // phone with country code
+String waApiKey = "";               // CallMeBot key (secret - never echoed to browser)
+bool dcEnabled = false;             // Discord notifications via a channel webhook
+String dcWebhook = "";              // webhook URL (secret - never echoed to browser)
+bool statsPingEnabled = true;       // anonymous install ping (MAC hash + version + print hours)
+uint8_t prevRegularExposure = 0;    // last replaced Regular exposure (0 = none) - dashboard Undo
 unsigned long lastUiActivityMs = 0;
 bool uiBlanked = false;
 
@@ -159,6 +166,8 @@ void loadDeviceConfig() {
   wifiEnabled = sysPrefs.getBool("wifiEnabled", true);
   webDashboardEnabled = sysPrefs.getBool("webDash", true);
   bootUpdateCheckEnabled = sysPrefs.getBool("bootUpdChk", true);
+  statsPingEnabled = sysPrefs.getBool("statsPing", true);
+  prevRegularExposure = sysPrefs.getUChar("prevRegExp", 0);
   bootAnimName = sysPrefs.getString("bootAnimName", "");
   mqttEnabled = sysPrefs.getBool("mqttEnabled", false);
   mqttHost = sysPrefs.getString("mqttHost", "");
@@ -181,6 +190,13 @@ void loadDeviceConfig() {
   tgEnabled = sysPrefs.getBool("tgEnabled", false);
   tgToken = sysPrefs.getString("tgToken", "");
   tgChat = sysPrefs.getString("tgChat", "");
+  waEnabled = sysPrefs.getBool("waEnabled", false);
+  waPhone = sysPrefs.getString("waPhone", "");
+  waApiKey = sysPrefs.getString("waApiKey", "");
+  dcEnabled = sysPrefs.getBool("dcEnabled", false);
+  dcWebhook = sysPrefs.getString("dcWebhook", "");
+  if (tgEnabled) { waEnabled = false; dcEnabled = false; }  // one channel at a time
+  else if (waEnabled) dcEnabled = false;
   vatRemainingMl = sysPrefs.getFloat("vatRemMl", -1);
   lowResinPauseEnabled = sysPrefs.getBool("lowResinOn", false);
   lowResinThresholdMl = sysPrefs.getUChar("lowResinMl", 2);
@@ -197,6 +213,7 @@ void saveDeviceConfig() {
   sysPrefs.putBool("wifiEnabled", wifiEnabled);
   sysPrefs.putBool("webDash", webDashboardEnabled);
   sysPrefs.putBool("bootUpdChk", bootUpdateCheckEnabled);
+  sysPrefs.putBool("statsPing", statsPingEnabled);
   sysPrefs.putString("bootAnimName", bootAnimName);
   sysPrefs.putBool("mqttEnabled", mqttEnabled);
   sysPrefs.putString("mqttHost", mqttHost);
@@ -216,6 +233,11 @@ void saveDeviceConfig() {
   sysPrefs.putBool("tgEnabled", tgEnabled);
   sysPrefs.putString("tgToken", tgToken);
   sysPrefs.putString("tgChat", tgChat);
+  sysPrefs.putBool("waEnabled", waEnabled);
+  sysPrefs.putString("waPhone", waPhone);
+  sysPrefs.putString("waApiKey", waApiKey);
+  sysPrefs.putBool("dcEnabled", dcEnabled);
+  sysPrefs.putString("dcWebhook", dcWebhook);
   sysPrefs.putBool("lowResinOn", lowResinPauseEnabled);
   sysPrefs.putUChar("lowResinMl", lowResinThresholdMl);
   sysPrefs.putBool("askRefill", askRefillEnabled);
@@ -405,6 +427,18 @@ void savePrintSettings() {
   EEPROM.commit();
 }
 
+// Safety net for a bad calibration: whenever Regular exposure is REPLACED
+// (exposure-test pick or a dashboard config save - not the +-1 LCD steps),
+// the old value is remembered so the dashboard can offer a one-click Undo.
+// Undo goes through the same path, so undo-of-undo swaps back.
+void rememberPrevRegularExposure(long oldVal) {
+  if (oldVal <= 0 || oldVal > 30 || oldVal == Regular_Exposure) return;
+  prevRegularExposure = (uint8_t)oldVal;
+  sysPrefs.begin("tinymaker", false);
+  sysPrefs.putUChar("prevRegExp", prevRegularExposure);
+  sysPrefs.end();
+}
+
 // ===================================================================================
 // Settings backup & restore (flat JSON, on SD or via the dashboard)
 // ===================================================================================
@@ -499,6 +533,16 @@ String buildConfigBackupJson(bool includeSecrets = true) {
   }
   out += ",\"tgChat\":\"";
   out += backupEscape(tgChat);
+  out += "\",\"waEnabled\":";
+  out += waEnabled ? "true" : "false";
+  out += ",\"waPhone\":\"";
+  out += backupEscape(waPhone);
+  out += "\",\"waApiKey\":\"";
+  out += backupEscape(waApiKey);
+  out += "\",\"dcEnabled\":";
+  out += dcEnabled ? "true" : "false";
+  out += ",\"dcWebhook\":\"";
+  out += backupEscape(dcWebhook);
   out += "\",\"connectEnabled\":";
   out += connectEnabled ? "true" : "false";
   out += ",\"connectBaseUrl\":\"";
@@ -509,16 +553,20 @@ String buildConfigBackupJson(bool includeSecrets = true) {
   out += connectLeaderboardOptIn ? "true" : "false";
   out += ",\"connectPublicId\":\"";
   out += backupEscape(connectPrinterPublicId);
+  out += "\"";
   if (includeSecrets) {
-    out += "\",\"connectToken\":\"";
+    out += ",\"connectToken\":\"";
     out += backupEscape(connectPublishToken);
     out += "\",\"connectRecoveryCode\":\"";
     out += backupEscape(connectRecoveryCode);
+    out += "\"";
   }
-  out += "\",\"connectAutoBackup\":";
+  out += ",\"connectAutoBackup\":";
   out += connectAutoBackup ? "true" : "false";
   out += ",\"connectBackupEpoch\":";
   out += String(connectBackupEpoch);
+  out += ",\"statsPing\":";
+  out += statsPingEnabled ? "true" : "false";
   out += ",\"printSecs\":";
   out += String(totalPrintSecs);
   out += ",\"uvLedSecs\":";
@@ -605,6 +653,13 @@ void applyConfigBackup(const String &j) {
   tgEnabled = wifiEnabled && backupBool(j, "tgEnabled", tgEnabled);
   tgToken = backupStr(j, "tgToken", tgToken);
   tgChat = backupStr(j, "tgChat", tgChat);
+  waEnabled = wifiEnabled && backupBool(j, "waEnabled", waEnabled);
+  waPhone = backupStr(j, "waPhone", waPhone);
+  waApiKey = backupStr(j, "waApiKey", waApiKey);
+  dcEnabled = wifiEnabled && backupBool(j, "dcEnabled", dcEnabled);
+  dcWebhook = backupStr(j, "dcWebhook", dcWebhook);
+  if (tgEnabled) { waEnabled = false; dcEnabled = false; }  // one channel at a time
+  else if (waEnabled) dcEnabled = false;
   connectEnabled = wifiEnabled && backupBool(j, "connectEnabled", connectEnabled);
   connectBaseUrl = backupStr(j, "connectBaseUrl", connectBaseUrl);
   connectPrinterName = backupStr(j, "connectPrinterName", connectPrinterName);
@@ -616,6 +671,7 @@ void applyConfigBackup(const String &j) {
   connectRecoveryCode = backupStr(j, "connectRecoveryCode", connectRecoveryCode);
   connectAutoBackup = backupBool(j, "connectAutoBackup", connectAutoBackup);
   connectBackupEpoch = (uint32_t)backupNum(j, "connectBackupEpoch", connectBackupEpoch);
+  statsPingEnabled = backupBool(j, "statsPing", statsPingEnabled);
   totalPrintSecs = (uint32_t)backupNum(j, "printSecs", totalPrintSecs);
   totalUvLedSecs = (uint32_t)backupNum(j, "uvLedSecs", totalUvLedSecs);
   vatRemainingMl = (float)backupNum(j, "vatRemainingMl", vatRemainingMl);
@@ -1061,6 +1117,7 @@ void loop() {
         break;
       #if ENABLE_NETWORK
       case 422:                 // install-from-file screen -> back to Update
+      case 4211:                // install confirmation -> Cancel, back to Update
       screen421();
         break;
       case 423:                 // temporary WiFi prompt -> cancel, back to System > Update
@@ -1077,7 +1134,9 @@ void loop() {
         finishRestorePromptBoot();
         break;
       case 232:                 // exposure test intro -> back to Advanced
-      case 2321:                // exposure test result -> back to Advanced
+      case 2321:                // exposure test result -> Skip (no pick)
+      case 23211:               // exposure test canceled -> back to Advanced
+      case 2322:                // best-bar picker -> Skip (keep current)
         screenAdvancedOptions();
         break;
       case 431:
@@ -1156,6 +1215,9 @@ void loop() {
         break;
       case 42:
       screen41();
+        break;
+      case 2322:                // UP on best-bar picker -> next option (1..8, shift-, shift+)
+        expTestPickNext();
         break;
       #if ENABLE_NETWORK
       case 421:                 // UP on Update screen -> install from file
@@ -1789,8 +1851,11 @@ void loop() {
         saveDeviceConfig();
         screen1();
         break;
-      case 421:                 // Update screen -> install latest (self-update)
-        if (otaHasUpdate()) otaInstallLatest();
+      case 421:                 // Update screen -> confirm before installing
+        if (otaHasUpdate()) screenUpdateConfirm();
+        break;
+      case 4211:                // install confirmation -> Install
+        otaInstallLatest();
         break;
       #endif
       case 426:                 // SD settings restore prompt -> Restore
@@ -1800,8 +1865,14 @@ void loop() {
       case 232:                 // exposure test intro -> Start
         runExpTest();
         break;
-      case 2321:                // exposure test result -> back to Advanced
+      case 2321:                // exposure test result -> Pick best bar
+        expTestPickStart();
+        break;
+      case 23211:               // exposure test canceled -> back to Advanced
         screenAdvancedOptions();
+        break;
+      case 2322:                // best-bar picker -> Set (apply the pick)
+        expTestApplyPick();
         break;
       case 441:
         advancedOptionsSelect();

@@ -15,8 +15,46 @@ unless noted. Community contributors are tagged inline.
 
 ## [Unreleased] — `experimental` branch
 
-Work validated on hardware and heading to `main` as **0.14.3** after a quiet
-window. Flash from the `experimental` branch to try it early.
+### Added
+- **WhatsApp and Discord notifications** — same three messages as Telegram
+  (finished / low-resin pause / canceled): WhatsApp through the free CallMeBot
+  gateway (one-time activation, inline help), Discord through a channel
+  webhook (no bot needed). Settings has one *Phone notifications* choice:
+  Off / Telegram / WhatsApp / Discord.
+- **Exposure undo** — when the exposure test (or a config save) replaces your
+  Regular exposure, the old value is remembered and an *Undo (Xs)* link
+  appears next to the field.
+- The dashboard header links the project site, **tinymakerwifi.com**.
+- **Light theme** — the dashboard gets a light/dark toggle (the crescent next
+  to *Manual*); your choice sticks per browser. Same orange, no flash on load.
+- **Branded WiFi setup** — the `TinyMaker-Setup` portal now shows the project
+  logo, firmware version and where to find the manual, styled to match the
+  dashboard.
+- **Getting started guide** — a dismissible first-steps checklist on the
+  dashboard (WiFi → slicer → first model → first print → exposure →
+  integrations); the printer ticks steps off by itself where it can. Small
+  **?** marks next to tricky settings (layer height, resin tracking, web
+  control, backup) open short explanations.
+- **Exposure test result entry** — after the test strip, the printer asks
+  *"Best bar (count dots)?"*: cycle to the number of dots on the crispest bar
+  and it sets *Regular exposure* itself — no manual Settings trip. Two extra
+  positions shift the whole ladder shorter/longer for a re-run when no bar
+  was right.
+- **Install confirmation on the printer** — the on-device self-update now asks
+  *"Install update?"* (with versions) before flashing, so a stray OK on the
+  Update screen can't start it.
+- **Anonymous usage ping** — once per firmware version (the first boot after a
+  flash) the printer sends a hash of its factory MAC, the firmware version and
+  the lifetime print hours, so we know how many printers are out there and
+  which versions they run. Nothing else is sent, ever; switch it off in
+  Settings (*Anonymous usage ping*).
+- **Project logo** — the dashboard favicon is now the layer-stack + WiFi mark,
+  and the Update tab shows a community counter (*N printers running
+  TinyMakerWifi*) fed by the anonymous ping.
+- The manual gained an advanced section on deriving your resin's **working
+  curve (Jacobs)** from the test strip with calipers.
+
+## [0.14.3] — 2026-07-13
 
 ### Added
 - **Telegram notifications** — the printer messages you when a print
@@ -29,8 +67,12 @@ window. Flash from the `experimental` branch to try it early.
   animations you can pick on the printer or in the dashboard, and install
   straight from the community site. *(contributed by [@Tann2019](https://github.com/Tann2019))*
 - **Build tag in the dashboard header** — experimental builds show their git
-  commit next to the version (`Firmware 0.14.2 (abc1234)`), so you can tell
+  commit next to the version (`Firmware 0.14.3 (abc1234)`), so you can tell
   exactly which build is flashed.
+- **TinyMaker Connect (early preview)** — an opt-in link to the community
+  model-sharing service being built by [@Briadark](https://github.com/Briadark).
+  Off by default; when enabled in Settings, a Connect tab shows your shared-model
+  activity. The service itself is still in testing — more when it opens up.
 
 ### Changed
 - **Dashboard styling pass:** native browser confirm dialogs replaced with a

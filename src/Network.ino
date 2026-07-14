@@ -42,6 +42,7 @@
 #include <esp_wifi.h>      // esp_wifi_restore() for reliable credential erase
 #include <Preferences.h>   // forcePortal flag (survives reboot)
 #include <PubSubClient.h>
+#include "mbedtls/sha256.h" // anonymous stats id (hash of the efuse MAC)
 
 bool networkRuntimeEnabled() {
   return wifiEnabled || wifiTemporarilyEnabled;
@@ -65,6 +66,7 @@ bool rejectIfWebControlOff() {
 // version.txt must contain two lines: (1) the latest version, e.g. "0.7.0",
 // (2) the direct HTTPS URL of that firmware.bin. Both hosted on GitHub Pages.
 #define OTA_VERSION_URL "https://slibbinas.github.io/TinyMakerWifi/version.txt"
+#define STATS_PING_URL  "https://tinymaker-stats.slibbinas.workers.dev/ping"
 
 WebServer server(80);
 Preferences netPrefs;
@@ -152,6 +154,17 @@ String limitedUploadArg(const char *name, uint16_t maxLen) {
   v.trim();
   if (v.length() > maxLen) v = v.substring(0, maxLen);
   return v;
+}
+
+// SD-backup presence cache for /api/config (see configJson).
+bool sdBackupCacheValid = false;
+bool sdBackupCachePresent = false;
+uint32_t sdBackupCacheEpoch = 0;
+
+void refreshSdBackupCache() {
+  sdBackupCachePresent = sdCardReady() && sdBackupExists();
+  sdBackupCacheEpoch = sdBackupCachePresent ? sdBackupSavedEpoch() : 0;
+  sdBackupCacheValid = true;
 }
 
 // Streaming part - called repeatedly with chunks of the multipart body
@@ -444,11 +457,17 @@ String otaStyledPage(const String &inner) {
   return String(
     "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker firmware update</title>"
-    // Inline data-URI favicon (orange rounded square with a white T) -
+    // Inline data-URI favicon (project logo: layer stack + WiFi arc) -
     // shows in the browser tab and bookmarks, nothing stored on the device
-    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
-    "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
-    "<text x='8' y='12.5' font-family='Arial' font-size='11' font-weight='bold' fill='white' text-anchor='middle'>T</text></svg>\">"
+    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+    "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+    "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
     "<style>"
     "*{box-sizing:border-box}"
     "body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;"
@@ -1188,6 +1207,8 @@ String configJson() {
   out += String(Base_Exposure);
   out += ",\"regularExposure\":";
   out += String(Regular_Exposure);
+  out += ",\"prevRegularExposure\":";
+  out += String(prevRegularExposure);
   out += ",\"baseLayers\":";
   out += String(Base_Layer);
   out += ",\"transitionLayers\":";
@@ -1222,6 +1243,8 @@ String configJson() {
   out += webDashboardEnabled ? "true" : "false";
   out += ",\"bootUpdateCheck\":";
   out += bootUpdateCheckEnabled ? "true" : "false";
+  out += ",\"statsPing\":";
+  out += statsPingEnabled ? "true" : "false";
   out += ",\"mqttEnabled\":";
   out += mqttEnabled ? "true" : "false";
   out += ",\"mqttConfigured\":";
@@ -1237,13 +1260,19 @@ String configJson() {
   out += ",\"mqttTopic\":\"";
   out += jsonEscape(mqttTopic);
   out += "\"";
-  bool sdBk = !printerBusy() && sdCardReady() && sdBackupExists();
+  // Cached: the dashboard polls /api/config and the three SD opens per
+  // request (ready + exists + epoch) added up. Refreshed lazily once and
+  // after every Backup-to-SD write.
+  if (!sdBackupCacheValid && !printerBusy()) refreshSdBackupCache();
+  bool sdBk = !printerBusy() && sdBackupCachePresent;
   out += ",\"sdBackupPresent\":";
   out += sdBk ? "true" : "false";
   out += ",\"sdBackupEpoch\":";
-  out += String(sdBk ? sdBackupSavedEpoch() : 0);
+  out += String(sdBk ? sdBackupCacheEpoch : 0);
   out += tinymakerConnectConfigJson();
   out += tinymakerTelegramConfigJson();
+  out += tinymakerWhatsAppConfigJson();
+  out += tinymakerDiscordConfigJson();
   return out;
 }
 
@@ -1251,7 +1280,9 @@ void applyConfigRequest() {
   float requestedLayer = server.hasArg("layer_height") ? server.arg("layer_height").toFloat() : Layer_Height;
   Layer_Height = requestedLayer < 0.075 ? 0.05 : 0.10;
   Base_Exposure = formLong("base_exposure", Base_Exposure, 10, 60);
+  long oldRegular = Regular_Exposure;
   Regular_Exposure = formLong("regular_exposure", Regular_Exposure, 1, 30);
+  rememberPrevRegularExposure(oldRegular);   // no-op unless it actually changed
   Base_Layer = formLong("base_layer", Base_Layer, 1, 8);
   Transition_Layer = formLong("transition_layer", Transition_Layer, 0, 10);
   Slow_Lift_Distance = formLong("slow_lift_distance", Slow_Lift_Distance, 1, 3);
@@ -1268,6 +1299,7 @@ void applyConfigRequest() {
   wifiEnabled = server.hasArg("wifi_enabled");
   webDashboardEnabled = wifiEnabled && server.hasArg("web_dashboard_enabled");
   bootUpdateCheckEnabled = server.hasArg("boot_update_check");
+  statsPingEnabled = server.hasArg("stats_ping");
   mqttEnabled = server.hasArg("mqtt_enabled");
   if (!wifiEnabled) mqttEnabled = false;
   mqttHost = formString("mqtt_host", mqttHost, 80);
@@ -1288,14 +1320,26 @@ void applyConfigRequest() {
   if (server.hasArg("connect_auto_backup_set")) {
     connectAutoBackup = server.hasArg("connect_auto_backup");
   }
-  tgEnabled = server.hasArg("tg_enabled");
-  if (!wifiEnabled) tgEnabled = false;
+  // One notification channel at a time (radio in the form): Telegram OR
+  // WhatsApp OR off. Credentials of the inactive channel are kept.
+  String ntf = formString("notify_channel", tgEnabled ? "tg" : (waEnabled ? "wa" : (dcEnabled ? "dc" : "none")), 8);
+  tgEnabled = wifiEnabled && ntf == "tg";
+  waEnabled = wifiEnabled && ntf == "wa";
+  dcEnabled = wifiEnabled && ntf == "dc";
   // Token is a secret: only overwrite when a new one is supplied, so a blank
   // field keeps the stored value (same rule as the MQTT password).
   if (server.hasArg("tg_token") && server.arg("tg_token").length() > 0) {
     tgToken = formString("tg_token", tgToken, 64);
   }
   tgChat = formString("tg_chat", tgChat, 32);
+  waPhone = formString("wa_phone", waPhone, 20);
+  if (server.hasArg("wa_apikey") && server.arg("wa_apikey").length() > 0) {
+    waApiKey = formString("wa_apikey", waApiKey, 16);
+  }
+  if (server.hasArg("dc_webhook") && server.arg("dc_webhook").length() > 0) {
+    dcWebhook = formString("dc_webhook", dcWebhook, 200);
+    dcWebhook.trim();
+  }
 
   savePrintSettings();
   saveDeviceConfig();
@@ -1351,6 +1395,7 @@ void handleApiConfigBackupSd() {
     sendApiError(500, "could not write the backup to SD");
     return;
   }
+  refreshSdBackupCache();
   sendApiOk("\"message\":\"Backup saved to SD (tinymaker-backup.json).\"");
 }
 
@@ -1976,77 +2021,105 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
   server.sendContent_P(PSTR(
     "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
     "<title>TinyMaker</title>"
-    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'>"
-    "<rect width='16' height='16' rx='3' fill='%23e8720c'/>"
-    "<text x='8' y='12.5' font-family='Arial' font-size='11' font-weight='bold' fill='white' text-anchor='middle'>T</text></svg>\">"
+    "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+    "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+    "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+    "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+    "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
+    // Theme boot: apply the saved choice to <html> BEFORE the stylesheet
+    // parses, so a light-theme reload never flashes dark (manual does the same).
+    "<script>(function(){try{if(localStorage.getItem('tmTheme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}})()</script>"
     "<style>"
+    // All colors live in CSS variables; [data-theme=light] swaps the palette
+    // (same accent orange). Keep new rules on variables, not literals.
+    ":root{color-scheme:dark;--bg:#1c1c1e;--wrap:#232326;--card:#2a2a2e;--tile:#202024;--pv:#151517;"
+    "--line:#3a3a3f;--line2:#555;--line3:#444;--text:#eee;--muted:#aaa;--muted2:#8a8a92;"
+    "--accent:#e8720c;--link:#84bcf8;--btnsec:#3c3c42;--btnsec-t:#eee;--danger:#7b2f2f;"
+    "--dis:#555;--dis-t:#aaa;--overlay:rgba(20,20,22,.93);--dim:rgba(20,20,22,.6);"
+    "--toast:#2e2e33;--toast-t:#fff;--warncol:#ffb15f;--banner:#3a2818;--warnbg:#3a2320;"
+    "--subh:#98938a;--fwb:#777;--wbar:#4a4a50}"
+    "[data-theme=light]{color-scheme:light;--bg:#eceef1;--wrap:#f8f9fa;--card:#fff;--tile:#f4f5f7;--pv:#e8eaee;"
+    "--line:#d9dbe0;--line2:#c2c6cd;--line3:#d0d3d8;--text:#1f2124;--muted:#5f6570;--muted2:#6a707a;"
+    "--link:#155fb0;--btnsec:#dcdfe4;--btnsec-t:#26282c;--danger:#b23434;"
+    "--dis:#c9ccd2;--dis-t:#82878f;--overlay:rgba(243,244,246,.93);--dim:rgba(100,104,112,.45);"
+    "--toast:#fff;--toast-t:#1f2124;--warncol:#9a5b00;--banner:#fff1e0;--warnbg:#fdecec;"
+    "--subh:#7a736a;--fwb:#9aa0a8;--wbar:#c8ccd2}"
     "*{box-sizing:border-box}"
-    "body{margin:0;min-height:100vh;background:#1c1c1e;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#eee}"
+    "body{margin:0;min-height:100vh;background:var(--bg);font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:var(--text)}"
     // Orange window frame matching the printer's on-screen UI
-    ".wrap{max-width:560px;margin:16px auto;padding:20px 18px;border:2px solid #e8720c;border-radius:14px;background:#232326}"
+    ".wrap{max-width:560px;margin:16px auto;padding:20px 18px;border:2px solid var(--accent);border-radius:14px;background:var(--wrap)}"
     ".head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}"
-    "h1{margin:0;font-size:24px;color:#e8720c}h2{font-size:17px;margin:0 0 12px;color:#eee}.fw{font-size:13px;color:#aaa}"
-    ".card{background:#2a2a2e;border:1px solid #444;border-radius:10px;padding:18px;margin:12px 0}"
+    "h1{margin:0;font-size:24px;color:var(--accent)}h2{font-size:17px;margin:0 0 12px;color:var(--text)}.fw{font-size:13px;color:var(--muted)}"
+    "#themeBtn,#gsBtn{color:var(--muted);font-size:16px;text-decoration:none;margin-left:6px}#themeBtn:hover,#gsBtn:hover{color:var(--text);text-decoration:none}"
+    // Getting-started rows + the little round contextual-help marks
+    ".gsRow{display:flex;gap:10px;border-top:1px solid var(--line);padding:9px 0;align-items:flex-start}.gsRow:first-child{border-top:0;padding-top:0}"
+    ".gsMark{cursor:pointer;color:var(--muted);font-size:16px;width:22px;flex:0 0 auto;text-align:center;line-height:1.3}.gsMark.on{color:#2fbf4f;cursor:default}"
+    ".qHelp{display:inline-block;margin-left:6px;width:16px;height:16px;line-height:15px;text-align:center;border:1px solid var(--line2);border-radius:50%;font-size:11px;color:var(--muted)}.qHelp:hover{color:var(--text);text-decoration:none}"
+    ".card{background:var(--card);border:1px solid var(--line3);border-radius:10px;padding:18px;margin:12px 0}"
     ".grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}"
-    ".label{font-size:12px;color:#aaa}.value{font-size:16px;margin-top:4px}"
+    ".label{font-size:12px;color:var(--muted)}.value{font-size:16px;margin-top:4px}"
     ".files{display:grid;gap:8px}.file{display:flex;align-items:center;justify-content:space-between;gap:10px;"
-    "border-top:1px solid #3a3a3f;padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
+    "border-top:1px solid var(--line);padding-top:10px}.file:first-child{border-top:0;padding-top:0}"
     ".rowActions{display:flex;gap:8px;align-items:center}"
-    ".meta{font-size:12px;color:#aaa;margin-top:3px}"
-    ".connectTabs{display:flex;gap:8px;margin-top:14px}.connectTabs button{width:auto;flex:1;margin-top:0;background:#3c3c42}.connectTabs button.active{background:#e8720c}"
-    "a{color:#84bcf8;text-decoration:none}a:hover{text-decoration:underline}a:visited{color:#84bcf8}"
-    "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid #555;border-radius:8px;background:#1c1c1e;color:#eee}"
-    "label span{display:block;font-size:13px;color:#aaa}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
+    ".meta{font-size:12px;color:var(--muted2);margin-top:3px}"
+    ".connectTabs{display:flex;gap:8px;margin-top:14px}.connectTabs button{width:auto;flex:1;margin-top:0;background:var(--btnsec);color:var(--btnsec-t)}.connectTabs button.active{background:var(--accent);color:#fff}"
+    "a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}a:visited{color:var(--link)}"
+    "input[type=file],input[type=number],input[type=text],input[type=password],select{width:100%;margin:6px 0 12px;padding:10px;border:1px solid var(--line2);border-radius:8px;background:var(--bg);color:var(--text)}"
+    "label span{display:block;font-size:13px;color:var(--muted)}.configGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px}"
     ".spanAll{grid-column:1/-1}"
-    ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:#eee}"
+    ".check{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.check input{width:auto}.check span{display:inline;color:var(--text)}"
     ".actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}"
     // Tabs: equal-size Dashboard/Settings/Update, active one orange
-    ".toolbar{display:flex;gap:8px;margin:12px 0}.toolbar button,.toolbar .button{width:auto;flex:1;margin-top:0;background:#3c3c42;color:#eee}"
-    ".toolbar .active{background:#e8720c;color:#fff}"
+    ".toolbar{display:flex;gap:8px;margin:12px 0}.toolbar button,.toolbar .button{width:auto;flex:1;margin-top:0;background:var(--btnsec);color:var(--btnsec-t)}"
+    ".toolbar .active{background:var(--accent);color:#fff}"
     // Mini WiFi signal bars (same idea as the printer's badge)
     ".wbars{display:inline-flex;gap:2px;align-items:flex-end;margin-left:8px;vertical-align:middle}"
-    ".wbars i{width:4px;background:#4a4a50;border-radius:1px}.wbars i:nth-child(1){height:5px}"
+    ".wbars i{width:4px;background:var(--wbar);border-radius:1px}.wbars i:nth-child(1){height:5px}"
     ".wbars i:nth-child(2){height:9px}.wbars i:nth-child(3){height:13px}.wbars i.on{background:#2fbf4f}"
-    ".banner{background:#3a2818;border-color:#e8720c}.banner strong{display:block;color:#ffb15f;margin-bottom:4px}"
-    ".progress{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin:10px 0 16px}"
-    ".progress span{display:block;height:100%;width:45%;background:#e8720c;animation:barMove 1.1s infinite linear}"
-    ".storageBar{height:10px;border:1px solid #555;border-radius:999px;overflow:hidden;background:#1c1c1e;margin-top:8px}"
-    ".storageBar span{display:block;height:100%;width:0;background:#e8720c;transition:width .2s ease}"
+    ".banner{background:var(--banner);border-color:var(--accent)}.banner strong{display:block;color:var(--warncol);margin-bottom:4px}"
+    ".progress{height:10px;border:1px solid var(--line2);border-radius:999px;overflow:hidden;background:var(--bg);margin:10px 0 16px}"
+    ".progress span{display:block;height:100%;width:45%;background:var(--accent);animation:barMove 1.1s infinite linear}"
+    ".storageBar{height:10px;border:1px solid var(--line2);border-radius:999px;overflow:hidden;background:var(--bg);margin-top:8px}"
+    ".storageBar span{display:block;height:100%;width:0;background:var(--accent);transition:width .2s ease}"
     "@keyframes barMove{0%{transform:translateX(-110%)}100%{transform:translateX(230%)}}"
     // Every standalone button gets a top gap so it never sticks to the content
     // above it (primary buttons used to lack this - secondary had it inline).
     // Buttons laid out in rows/grids zero it below; those containers own spacing.
-    "button,.button{display:inline-block;width:100%;border:0;border-radius:8px;background:#e8720c;color:#fff;padding:12px 14px;margin-top:10px;"
+    "button,.button{display:inline-block;width:100%;border:0;border-radius:8px;background:var(--accent);color:#fff;padding:12px 14px;margin-top:10px;"
     "font-size:15px;font-weight:600;text-align:center;text-decoration:none;cursor:pointer}"
-    ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:#7b2f2f}.secondaryBtn{background:#3c3c42}"
-    "button:disabled{background:#555;color:#aaa;cursor:not-allowed}"
-    ".button.secondary{background:#3c3c42}"
-    ".button.danger{background:#7b2f2f}"
+    ".small,.delete{width:auto;padding:9px 11px;font-size:13px}.delete{background:var(--danger);color:#fff}.secondaryBtn{background:var(--btnsec);color:var(--btnsec-t)}"
+    "button:disabled{background:var(--dis);color:var(--dis-t);cursor:not-allowed}"
+    ".button.secondary{background:var(--btnsec);color:var(--btnsec-t)}"
+    ".button.danger{background:var(--danger);color:#fff}"
     ".grid button,.grid .button,.actions button,.actions .button,.connectActions button,.connectActions .button,.rowActions button,.rowActions .button{margin-top:0}"
     // Full-page lock while a firmware update is in flight; cleared by the
     // automatic reload once the printer answers status polls again.
-    ".updOverlay{position:fixed;inset:0;z-index:99;background:rgba(20,20,22,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
-    ".updOverlay.on{display:flex}.updOverlay h2{color:#e8720c}"
-    ".modal{position:fixed;inset:0;z-index:80;background:rgba(20,20,22,.6);display:flex;align-items:center;justify-content:center;padding:20px}"
+    ".updOverlay{position:fixed;inset:0;z-index:99;background:var(--overlay);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}"
+    ".updOverlay.on{display:flex}.updOverlay h2{color:var(--accent)}"
+    ".modal{position:fixed;inset:0;z-index:80;background:var(--dim);display:flex;align-items:center;justify-content:center;padding:20px}"
     ".modal.hidden{display:none}"
-    ".modalCard{background:#1c1c1e;border:1px solid #3a3a3f;border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
-    ".modalText{color:#eee;font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
+    ".modalCard{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:20px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.55)}"
+    ".modalText{color:var(--text);font-size:15px;line-height:1.5;white-space:pre-line;margin-bottom:18px}"
     // .button.secondary (0,2,0) outranks .modalBtns button (0,1,1) - without the
     // extra selector Cancel keeps its 10px margin-top and renders shorter than OK.
     ".modalBtns{display:flex;gap:10px}.modalBtns button,.modalBtns .button.secondary{margin-top:0;flex:1;width:auto;padding:12px 14px;font-size:15px}"
-    ".fwbuild{color:#777;font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
-    ".subhead{grid-column:1/-1;margin-top:6px;padding-top:14px;border-top:1px solid #3a3a3f;font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:#98938a}"
+    ".fwbuild{color:var(--fwb);font-size:11px;font-family:monospace}.fwbuild:empty{display:none}"
+    ".subhead{grid-column:1/-1;margin-top:6px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;letter-spacing:.5px;text-transform:uppercase;color:var(--subh)}"
     ".pwWrap{position:relative;display:block}.pwWrap input{width:100%;padding-right:40px}"
-    ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:#aaa}.eyeBtn:hover{color:#eee}"
-    ".updSpin{width:34px;height:34px;border:4px solid #3c3c42;border-top-color:#e8720c;border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
-    ".warn{color:#ffb15f}"
+    ".eyeBtn{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:auto;background:transparent;border:0;padding:4px 8px;margin:0;font-size:16px;cursor:pointer;color:var(--muted)}.eyeBtn:hover{color:var(--text)}"
+    ".updSpin{width:34px;height:34px;border:4px solid var(--btnsec);border-top-color:var(--accent);border-radius:50%;animation:uspin 1s linear infinite}@keyframes uspin{to{transform:rotate(360deg)}}"
+    ".warn{color:var(--warncol)}"
     ".hidden{display:none}"
-    ".hint{font-size:13px;color:#aaa;margin:10px 0 0;line-height:1.4}"
+    ".hint{font-size:13px;color:var(--muted);margin:10px 0 0;line-height:1.4}"
     // Top-center: a bottom toast hid behind the action buttons and blended in.
     // Brand-orange border + slide-in: a static grey box was easy to miss.
-    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:#2e2e33;color:#fff;border:2px solid #e8720c;border-radius:10px;padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:14px;font-weight:600;line-height:1.4;animation:toastIn .25s ease}"
+    "#statusMsg{position:fixed;left:50%;top:14px;transform:translateX(-50%);max-width:92%;z-index:60;margin:0;background:var(--toast);color:var(--toast-t);border:2px solid var(--accent);border-radius:10px;padding:11px 18px;box-shadow:0 8px 24px rgba(0,0,0,.6);font-size:14px;font-weight:600;line-height:1.4;animation:toastIn .25s ease}"
     "@keyframes toastIn{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}"
-    "#statusMsg.warn{background:#3a2320;border-color:#d4705c;color:#ffb15f}"
+    "#statusMsg.warn{background:var(--warnbg);border-color:#d4705c;color:var(--warncol)}"
     "#statusMsg:empty{display:none}"
     ".configGrid .hint{grid-column:1/-1}"
     "@media(max-width:520px){.grid,.configGrid,.actions{grid-template-columns:1fr}.head{display:block}.fw{margin-top:4px}.file{align-items:flex-start;flex-direction:column}.rowActions{width:100%}.connectTabs{flex-direction:column}.leaderRow{grid-template-columns:32px minmax(0,1fr);gap:4px}.leaderRow .pill{width:max-content}}"
@@ -2055,8 +2128,21 @@ void sendRootStyledPage(PGM_P bodyBeforeFw, const char *fw, PGM_P bodyAfterFw) {
     // views stay a comfortable single column, centered.
     "@media(min-width:1000px){.wrap{max-width:1100px}"
     "#homeView:not(.hidden){display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}"
+    "#gsCard{grid-column:1/-1}"
+    // Left column stacks status/controls/3D; the SD manager owns the right
+    // column full-height (cards used to auto-flow and overlap oddly mid-print).
+    "#homeLeft{display:grid;gap:14px}"
     "#homeView .card{margin:0}"
-    "#modelPanel,#connectView,#configView,#updateView,#dryRunBanner,#webControlBanner{max-width:760px;margin-left:auto;margin-right:auto}}"
+    // Non-dashboard views used to sit in a narrow 760px band with big empty
+    // margins (user finding). Connect goes full width (its tiles auto-fill);
+    // the rest widen to 900 with three-column form fields, and the model
+    // panel splits info | 3D preview once the preview is open.
+    "#configView,#updateView,#modelPanel,#dryRunBanner,#webControlBanner{max-width:900px;margin-left:auto;margin-right:auto}"
+    ".configGrid{grid-template-columns:repeat(3,minmax(0,1fr))}"
+    "#cfgPair{display:grid;grid-template-columns:1fr 1fr;gap:12px}#cfgPair .card{margin:12px 0 0}"
+    "#modelPanel:has(#previewWrap:not(.hidden)){max-width:none;display:grid;grid-template-columns:1fr 1fr;column-gap:18px;align-items:start}"
+    "#modelPanel:has(#previewWrap:not(.hidden)) #modelBackButton,#modelPanel:has(#previewWrap:not(.hidden)) #modelTitle{grid-column:1/-1}"
+    "#modelPanel:has(#previewWrap:not(.hidden)) #previewWrap{grid-column:2;grid-row:3/span 6;margin-top:0}}"
     "</style></head><body><main class='wrap'>"));
   server.sendContent_P(bodyBeforeFw);
   server.sendContent(fw);
@@ -2076,14 +2162,14 @@ void handleRootPage() {
     "unknown";
 #endif
   static const char rootBodyBeforeFw[] PROGMEM = R"SPA(
-<div class='head'><div><h1>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
+<div class='head'><div><h1><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='26' height='26' style='vertical-align:-4px;margin-right:8px'><rect x='8' y='40' width='48' height='9' rx='3' fill='#e8720c'/><rect x='14' y='27' width='36' height='9' rx='3' fill='#e8720c' opacity='.75'/><rect x='20' y='14' width='24' height='9' rx='3' fill='#e8720c' opacity='.5'/><path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='#4da3ff' stroke-width='5' stroke-linecap='round'/></svg>TinyMaker</h1><div class='fw'>Firmware <span id='fwVersion'>)SPA";
   // data-build bakes the page's own build tag in, so a stale page left open in
   // a tab reloads itself as soon as a status poll reports a different build.
   static const char rootBodyAfterFw[] PROGMEM = R"SPA(</span><span id='fwBuild' class='fwbuild' data-build=")SPA"
 #ifdef GIT_REV
     GIT_REV
 #endif
-    R"SPA("></span> · <a href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a></div></div></div>
+    R"SPA("></span> · <a id='manualLink' href='https://slibbinas.github.io/TinyMakerWifi/manual/?theme=dark' target='_blank' rel='noopener'>Manual</a> · <a href='https://tinymakerwifi.com' target='_blank' rel='noopener' title='Project site'>tinymakerwifi.com</a><a href='#' id='themeBtn' title='Light / dark theme'>&#9680;</a><a href='#' id='gsBtn' title='Getting started guide'>?</a></div></div></div>
 
 <section id='dryRunBanner' class='card banner hidden'>
   <strong>Dry run mode enabled.</strong>
@@ -2100,7 +2186,7 @@ void handleRootPage() {
 
 <div id='confirmModal' class='modal hidden'><div class='modalCard'><div id='confirmText' class='modalText'></div><div id='confirmButtons' class='modalBtns'></div></div></div>
 
-<div id='tgHelpModal' class='modal hidden'><div class='modalCard'><div style='color:#eee;font-size:15px;line-height:1.5'><b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol></div><div class='modalBtns'><button id='tgHelpClose' type='button'>Close</button></div></div></div>
+<div id='helpModal' class='modal hidden'><div class='modalCard'><div id='helpBody' style='color:var(--text);font-size:15px;line-height:1.5;margin-bottom:18px'></div><div class='modalBtns'><button id='helpClose' type='button'>Close</button></div></div></div>
 
 <div class='toolbar'>
   <button id='homeViewButton' type='button' class='active'>Dashboard</button>
@@ -2112,6 +2198,13 @@ void handleRootPage() {
 <div id='statusMsg' class='hint'></div>
 
 <div id='homeView'>
+  <section id='gsCard' class='card hidden'>
+    <h2>Getting started</h2>
+    <div id='gsList'></div>
+    <div class='hint'>Circles are steps to do - the printer ticks some off by itself, click the rest when done. Reopen this guide any time with the ? next to Manual.</div>
+    <button id='gsHide' class='button secondary' type='button'>Hide this guide</button>
+  </section>
+  <div id='homeLeft'>
   <section class='card'>
     <div class='grid'>
       <div><div class='label'>State</div><div id='stateValue' class='value'>Loading</div></div>
@@ -2141,9 +2234,10 @@ void handleRootPage() {
 
   <section id='printPreviewCard' class='card hidden'>
     <h2>Print progress 3D</h2>
-    <canvas id='printPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
+    <canvas id='printPreviewCanvas' style='width:100%;border:1px solid var(--line);border-radius:8px;background:var(--pv)'></canvas>
     <div class='storageBar'><span id='printPreviewBarFill'></span></div>
   </section>
+  </div>
 
   <section id='sdSection' class='card'>
     <h2>SD manager</h2>
@@ -2176,11 +2270,12 @@ void handleRootPage() {
   <div class='actions'>
     <button id='modelPreviewButton' type='button'>Preview 3D</button>
     <button id='modelMlButton' type='button'>Calculate ml</button>
-    <button id='modelShareButton' class='secondaryBtn hidden' type='button'>Share model</button>
+    <button id='modelShareButton' class='secondaryBtn spanAll hidden' type='button'>Share model</button>
     <button id='modelStartButton' class='spanAll' type='button'>Start print</button>
   </div>
   <div id='previewWrap' class='hidden' style='margin-top:12px'>
-    <canvas id='modelPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
+    <div id='prevSpin' class='updSpin hidden' style='margin:14px auto'></div>
+    <canvas id='modelPreviewCanvas' style='width:100%;border:1px solid var(--line);border-radius:8px;background:var(--pv)'></canvas>
     <div class='hint'>Preview is built in the browser from every Nth sliced layer; the box is the printer's build volume (40.8 &times; 30.6 &times; 68 mm).</div>
   </div>
 </section>
@@ -2207,9 +2302,9 @@ void handleRootPage() {
   <div id='settingsPrintPane' class='settingsPane card'>
   <h2>Print settings</h2>
   <div class='configGrid'>
-    <label><span>Layer height (mm)</span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
+    <label><span>Layer height (mm)<a href='#' class='qHelp' data-help='layer'>?</a></span><input name='layer_height' id='cfgLayerHeight' type='number' min='0.05' max='0.10' step='0.05'></label>
     <label><span>Base exposure (s)</span><input name='base_exposure' id='cfgBaseExposure' type='number' min='10' max='60' step='1'></label>
-    <label><span>Regular exposure (s)</span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
+    <label><span>Regular exposure (s) <a href='#' id='undoRegExp' class='hidden'></a></span><input name='regular_exposure' id='cfgRegularExposure' type='number' min='1' max='30' step='1'></label>
     <label><span>Base layers</span><input name='base_layer' id='cfgBaseLayers' type='number' min='1' max='8' step='1'></label>
     <label><span>Transition layers</span><input name='transition_layer' id='cfgTransitionLayers' type='number' min='0' max='10' step='1'></label>
     <label><span>Slow lift distance (mm)</span><input name='slow_lift_distance' id='cfgSlowLiftDistance' type='number' min='1' max='3' step='1'></label>
@@ -2217,7 +2312,7 @@ void handleRootPage() {
     <label><span>Slow lift feedrate</span><input name='slow_lift_feedrate' id='cfgSlowLiftFeedrate' type='number' min='20' max='50' step='10'></label>
     <label><span>Fast lift feedrate</span><input name='fast_lift_feedrate' id='cfgFastLiftFeedrate' type='number' min='20' max='50' step='10'></label>
     <label><span>Drop back feedrate</span><input name='drop_back_feedrate' id='cfgDropBackFeedrate' type='number' min='20' max='50' step='10'></label>
-    <label><span>VAT size (ml)</span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
+    <label><span>VAT size (ml)<a href='#' class='qHelp' data-help='resin'>?</a></span><input name='vat_ml' id='cfgVatMl' type='number' min='10' max='40' step='1'></label>
     <label><span>Low resin warn (ml)</span><input name='low_resin_ml' id='cfgLowResinMl' type='number' min='1' max='3' step='1'></label>
     <label class='check'><input name='low_resin_pause' id='cfgLowResinPause' type='checkbox' value='1'><span>Low resin pause (mid-print)</span></label>
     <label class='check'><input name='ask_refill' id='cfgAskRefill' type='checkbox' value='1'><span>Ask refill before print</span></label>
@@ -2237,7 +2332,8 @@ void handleRootPage() {
   <h2>Network &amp; integrations</h2>
   <div class='configGrid'>
     <label class='check'><input name='wifi_enabled' id='cfgWifiEnabled' type='checkbox' value='1'><span>WiFi</span></label>
-    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)</span></label>
+    <label class='check'><input name='web_dashboard_enabled' id='cfgWebDashboardEnabled' type='checkbox' value='1'><span>Web control (browser actions)<a href='#' class='qHelp' data-help='web'>?</a></span></label>
+    <label class='check spanAll'><input name='stats_ping' id='cfgStatsPing' type='checkbox' value='1'><span>Anonymous usage ping (version + print hours, once per update)</span></label>
     <div class='subhead'>Smart home - MQTT</div>
     <label class='check spanAll'><input name='mqtt_enabled' id='cfgMqttEnabled' type='checkbox' value='1'><span>Enable MQTT</span></label>
     <div id='mqttFields' class='spanAll hidden'>
@@ -2280,18 +2376,33 @@ void handleRootPage() {
       <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
       <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
     </div>
-    <div class='subhead'>Telegram notifications</div>
-    <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Enable Telegram notifications</span></label>
+    <div class='subhead'>Phone notifications</div>
+    <div class='spanAll' style='display:flex;gap:18px;flex-wrap:wrap'>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfNone' value='none'><span>Off</span></label>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfTg' value='tg'><span>Telegram<a href='#' class='qHelp' data-help='tg'>?</a></span></label>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfWa' value='wa'><span>WhatsApp<a href='#' class='qHelp' data-help='wa'>?</a></span></label>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfDc' value='dc'><span>Discord<a href='#' class='qHelp' data-help='dc'>?</a></span></label>
+    </div>
     <div id='tgFields' class='spanAll hidden'>
       <div class='configGrid'>
         <label class='spanAll'><span>Bot token</span><span class='pwWrap'><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'><button id='cfgTgTokenShow' class='eyeBtn' type='button' title='Show/hide what you typed'>&#128065;</button></span></label>
         <label class='spanAll'><span>Chat ID</span><input name='tg_chat' id='cfgTgChat' type='text' maxlength='32' placeholder='123456789'></label>
       </div>
       <div id='tgHint' class='hint'>Messages you when a print finishes, pauses for low resin, or is canceled.</div>
-      <div class='actions'>
-        <button id='tgHelpButton' class='button secondary' type='button'>? How to get the token &amp; chat ID</button>
-        <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
+      <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
+    </div>
+    <div id='waFields' class='spanAll hidden'>
+      <div class='configGrid'>
+        <label><span>Phone (with country code)</span><input name='wa_phone' id='cfgWaPhone' type='text' maxlength='20' placeholder='+3706xxxxxxx'></label>
+        <label><span>CallMeBot API key</span><input name='wa_apikey' id='cfgWaKey' type='password' maxlength='16' autocomplete='off' placeholder='Leave blank to keep current'></label>
       </div>
+      <div id='waHint' class='hint'>Messages go through the free CallMeBot gateway - press ? above for the one-time activation.</div>
+      <button id='waTestButton' class='button secondary' type='button'>Send test message</button>
+    </div>
+    <div id='dcFields' class='spanAll hidden'>
+      <label class='spanAll'><span>Webhook URL</span><input name='dc_webhook' id='cfgDcWebhook' type='password' maxlength='200' autocomplete='off' placeholder='https://discord.com/api/webhooks/...'></label>
+      <div id='dcHint' class='hint'>Create one in your Discord server: Server Settings &gt; Integrations &gt; Webhooks.</div>
+      <button id='dcTestButton' class='button secondary' type='button'>Send test message</button>
     </div>
   </div>
   <button id='configSaveButton' type='submit'>Save config</button>
@@ -2303,7 +2414,7 @@ void handleRootPage() {
   <div id='bootAnimHint' class='hint'>Choose which animation plays at power-on. Send more from the community site; Delete removes one from the SD card.</div>
   </div>
   <div id='settingsBackupPane' class='settingsPane card hidden'>
-  <h2>Backup &amp; restore</h2>
+  <h2>Backup &amp; restore<a href='#' class='qHelp' data-help='backup'>?</a></h2>
   <div id='connectBackupTools' class='hidden'>
     <button id='connectAutoBackupButton' class='button' type='button'>Enable Auto backup to Connect</button>
     <div class='actions'>
@@ -2323,6 +2434,7 @@ void handleRootPage() {
   <button id='configDefaultsButton' class='button secondary' type='button'>Reset to defaults</button>
   <button id='configMqttResetButton' class='button secondary hidden' type='button'>Reset MQTT</button>
   </div>
+  </div>
   <div id='configHint' class='hint'>Config locks automatically while printing.</div>
 </section>
 
@@ -2333,6 +2445,7 @@ void handleRootPage() {
     <div><div class='label'>Latest</div><div id='updLatest' class='value'>-</div></div>
   </div>
   <div id='updMsg' class='hint'>Checking...</div>
+  <div id='communityStats' class='hint hidden'></div>
   <div class='actions'>
     <button id='updInstallLatest' class='spanAll' type='button' disabled>Install latest</button>
   </div>
@@ -2531,6 +2644,7 @@ const reloadIfFirmwareChanged=s=>{
 };
 const loadBootAnims=async()=>{
   const wrap=$('bootAnimList');
+  if(!wrap.childElementCount)wrap.innerHTML='<div class="hint">Loading animations...</div>';
   try{
     const d=await api('/api/boot-anim');
     const sel=d.selected||'';
@@ -2636,7 +2750,9 @@ const applyStatus=s=>{
     $('disableDryRunButton').disabled=!!s.busy;
     $('disableDryRunButton').textContent=s.busy?'Disable when idle':'Press here to disable';
     ['printLayerBox','printResinBox','printRunBox','printRemainingBox','printControls'].forEach(id=>show(id,s.busy));
-    show('sdSection',!s.busy);   // an empty, disabled SD manager mid-print is just noise
+    // Keep the SD manager card visible mid-print (user preference over the
+    // 0.13.4 hide): the last-known list stays on screen, locked - no fresh
+    // /api/files calls while printing (SD is busy feeding layers).
     // firmware actions lock the moment a print starts, even mid-visit
     if(s.busy)['updInstallLatest','updInstallSelected','updUploadButton','updFile','updVersionSelect'].forEach(id=>$(id).disabled=true);
     // 3D print progress: reuses slices prefetched before the start (or by an
@@ -2691,11 +2807,13 @@ const refreshStatus=async()=>{
     if(updLock&&!updSawDown&&Date.now()-updLockAt>90000){updLock=false;$('updOverlay').classList.remove('on');msg('Update did not start - the printer never went down. Check System > Update on the printer.',true);}
     statusFailCount=0;
     applyStatus(s);
+    if(typeof renderGs==='function')renderGs(); // auto-tick "first print"
     if(!pendingPrintCmd)msg('',false);
   }catch(e){
     statusFailCount++;
     if(updLock)updSawDown=true;
-    if(statusData&&statusData.busy)msg('Syncing with printer at the next safe network window...',true);
+    if(deleteBusy)msg('Deleting - the printer is busy removing files...');
+    else if(statusData&&statusData.busy)msg('Syncing with printer at the next safe network window...',true);
     else msg('Status unavailable: '+e.message,true);
   }finally{statusInFlight=false;}
 };
@@ -2705,27 +2823,34 @@ const FILES_PER_PAGE=12;
 const renderFiles=()=>{
   const list=$('filesList');
   const q=filesQuery.toLowerCase();
-  const items=q?filesItems.filter(it=>it.name.toLowerCase().indexOf(q)>=0):filesItems;
+  // Stable A-Z order (models first, then archives) - the raw list follows
+  // SD/FAT directory order, which reshuffles after deletes.
+  const sorted=filesItems.slice().sort((a,b)=>a.type!==b.type?(a.type==='model'?-1:1):a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
+  const items=q?sorted.filter(it=>it.name.toLowerCase().indexOf(q)>=0):sorted;
   const pages=Math.max(1,Math.ceil(items.length/FILES_PER_PAGE));
   if(filesPage>=pages)filesPage=pages-1;
   if(filesPage<0)filesPage=0;
   const slice=items.slice(filesPage*FILES_PER_PAGE,(filesPage+1)*FILES_PER_PAGE);
-  const dis=(statusData&&statusData.webControl===false)?' disabled':'';
-  let h='';
-  if(!slice.length)h='<div class="hint">'+(q?'No models match the filter.':'No printable model folders or SL1/ZIP archives found.')+'</div>';
+  const dis=(statusData&&(statusData.webControl===false||statusData.busy))?' disabled':'';
+  const busy=!!(statusData&&statusData.busy);
+  let h=busy?'<div class="hint warn">Locked while printing.</div>':'';
+  if(!slice.length)h+='<div class="hint">'+(q?'No models match the filter.':(busy?'SD contents load after the print finishes.':'No printable model folders or SL1/ZIP archives found.'))+'</div>';
   slice.forEach(it=>{
     const meta=it.type==='model'?'Model folder':'Archive - '+formatBytes(it.sizeBytes);
     h+='<div class="file"><div><strong>'+esc(it.name)+'</strong><div class="meta">'+esc(meta)+'</div></div><div class="rowActions">';
-    if(it.type==='model')h+='<button class="small secondaryBtn" onclick="modelDetails(\''+enc(it.name)+'\',false)">Details</button><button class="small"'+dis+' onclick="startPrint(\''+enc(it.name)+'\')">Start</button>';
+    if(it.type==='model')h+='<button class="small secondaryBtn"'+dis+' onclick="modelDetails(\''+enc(it.name)+'\',false)">Details</button><button class="small"'+dis+' onclick="startPrint(\''+enc(it.name)+'\')">Start</button>';
     h+='<button class="delete"'+dis+' onclick="deleteFile(\''+enc(it.name)+'\')">Delete</button></div></div>';
   });
+  const nModels=items.filter(it=>it.type==='model').length,nArch=items.length-nModels;
+  if(items.length>3)h+='<div class="meta" style="margin-top:10px">'+nModels+' model'+(nModels===1?'':'s')+(nArch?' · '+nArch+' archive'+(nArch===1?'':'s'):'')+'</div>';
   if(pages>1)h+='<div class="rowActions" style="justify-content:center;margin-top:10px"><button class="small secondaryBtn"'+(filesPage===0?' disabled':'')+' onclick="filesNav(-1)">&laquo; Prev</button><span class="meta">'+(filesPage+1)+' / '+pages+'</span><button class="small secondaryBtn"'+(filesPage+1>=pages?' disabled':'')+' onclick="filesNav(1)">Next &raquo;</button></div>';
   if(filesHidden>0)h+='<div class="hint">'+filesHidden+' other SD item(s) hidden.</div>';
   list.innerHTML=h;
 };
 const loadFiles=async()=>{
   const list=$('filesList');
-  if(statusData&&statusData.busy){list.innerHTML='<div class="hint warn">SD manager actions are disabled while printing.</div>';show('filesFilter',false);return;}
+  if(statusData&&statusData.busy){renderFiles();show('filesFilter',false);return;} // no SD reads mid-print; show the cached list, locked
+  if(!filesItems.length)list.innerHTML='<div class="hint">Loading the SD card...</div>';
   try{
     const d=await api('/api/files');
     updateSdUsage(d);
@@ -2734,6 +2859,7 @@ const loadFiles=async()=>{
     filesItems.forEach(it=>{if(it.type==='model'&&it.connectPublicId)connectLocalModels[it.connectPublicId]=it.name;});
     show('filesFilter',filesItems.length>FILES_PER_PAGE);
     renderFiles();
+    if(typeof renderGs==='function')renderGs(); // auto-tick "model on SD"
   }catch(e){updateSdUsage(null);list.innerHTML='<div class="hint warn">'+e.message+'</div>';}
 };
 
@@ -2849,7 +2975,9 @@ const fetchSlices=async(name,layers,modelH,btn,mode)=>{
     if(mode==='source05')url+='&source=1';
     else if(mode==='print1')url+='&layer_height=0.10';
     img.src=url;
-    await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('layer '+li+' failed to load'));});
+    // A hung request used to stall the preview forever with no way out -
+    // give every layer fetch a hard timeout (user finding, 0.14.3).
+    await new Promise((res,rej)=>{const t=setTimeout(()=>{img.src='';rej(new Error('layer '+li+' timed out - try again'));},20000);img.onload=()=>{clearTimeout(t);res();};img.onerror=()=>{clearTimeout(t);rej(new Error('layer '+li+' failed to load'));};});
     octx.drawImage(img,0,0,gw,gh);
     const d=octx.getImageData(0,0,gw,gh).data;
     const s=new Uint8Array(gw*gh);
@@ -2866,7 +2994,7 @@ const modelPreview=async()=>{
   if(!layers){msg('Model details are still loading - try again.',true);return;}
   const modelH=parseFloat($('modelHeight').textContent)||layers*0.05;
   const btn=$('modelPreviewButton');btn.disabled=true;
-  show('previewWrap',true);
+  show('previewWrap',true);show('prevSpin',true);
   try{
     if(slicesCache.name!==selectedModel||slicesCache.mode!=='current'||!slicesCache.slices.length)
       await fetchSlices(selectedModel,layers,modelH,btn);
@@ -2875,6 +3003,7 @@ const modelPreview=async()=>{
     try{await uploadModelPreview(selectedModel,blob,statusData&&Number(statusData.layerHeight)>0.06?'1':'05');}
     catch(e){msg('Preview shown, but saving it failed: '+e.message,true);}
   }catch(e){msg(e.message,true);show('previewWrap',false);}
+  show('prevSpin',false);
   btn.disabled=false;btn.textContent='Preview 3D';
 };
 
@@ -2959,7 +3088,11 @@ const startPrint=async(nameEnc,force)=>{const name=decodeURIComponent(nameEnc||e
   const r=await api('/api/print/start?name='+enc(name)+(force?'&force=1':''),{method:'POST'},8000);
   if(r&&r.warning==='low_resin'){if(await uiConfirm('Low resin: ~'+r.vatRemainingMl+' ml left in the VAT (estimate).\nStart anyway?'))startPrint(nameEnc,true);return;}
   msg('Print queued. Waiting for printer sync...');localPrintStartedAt=Date.now();lpsSynced=false;applyStatus(localBusyStatus('Homing',0));openView('home');refreshStatus();}catch(e){msg(e.message,true);}};
-const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!await uiConfirm('Delete this SD item?',{danger:true}))return;try{await api('/api/files/delete?name='+enc(name),{method:'POST'});msg('Deleted '+name+'.');loadFiles();}catch(e){msg(e.message,true);}};
+// Deleting a big model removes hundreds of layer files and blocks the printer
+// for a while - keep a persistent "deleting" toast and silence the status-poll
+// timeouts instead of flashing "Status unavailable" (user finding, 0.14.3).
+let deleteBusy=false;
+const deleteFile=async nameEnc=>{const name=decodeURIComponent(nameEnc);if(!await uiConfirm('Delete this SD item?',{danger:true}))return;deleteBusy=true;msg('Deleting '+name+' - large models take a while...');try{await api('/api/files/delete?name='+enc(name),{method:'POST'},180000);deleteBusy=false;msg('Deleted '+name+'.');loadFiles();refreshStatus();}catch(e){deleteBusy=false;msg(e.message,true);}};
 const printCommand=async(cmd,confirmText)=>{if(confirmText&&!await uiConfirm(confirmText,{danger:cmd==='stop'}))return;pendingPrintCmd=cmd;applyPendingPrintUi();msg((cmd==='stop'?'Stop':cmd==='pause'?'Pause':'Resume')+' requested. Waiting for printer connection...',true);retryPendingPrintCommand();};
 const fmtDur=ms=>{const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>0?h+'h '+m+'m':m+'m '+(s%60)+'s';};
 const tickLocalStatus=()=>{
@@ -2988,9 +3121,9 @@ const confirmNetworkToggle=async e=>{
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
 const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
-const updateTgFields=()=>show('tgFields',$('cfgTgEnabled').checked);
 const settingsTabs=['print','device','network','boot','backup'];
 const setSettingsTab=t=>{if(settingsTabs.indexOf(t)<0)t='print';settingsTabs.forEach(x=>{const id=x[0].toUpperCase()+x.slice(1);show('settings'+id+'Pane',x===t);$('settings'+id+'TabButton').classList.toggle('active',x===t);});};
+const updateTgFields=()=>{show('tgFields',$('ntfTg').checked);show('waFields',$('ntfWa').checked);show('dcFields',$('ntfDc').checked);};
 const updateConnectView=c=>{
   c=c||connectConfig||{};
   if(window.TinyMakerConnectHostedUpdate)window.TinyMakerConnectHostedUpdate(c);
@@ -2998,11 +3131,17 @@ const updateConnectView=c=>{
   show('modelShareButton',connectIsReady()&&!!selectedModel&&!selectedModelConnectPublicId);
 };
 const loadConfig=async()=>{
+  if(!connectConfig)$('configHint').textContent='Loading settings...';
   try{
     const c=await api('/api/config');
     connectConfig=c;
     $('cfgLayerHeight').value=Number(c.layerHeight).toFixed(2); $('cfgBaseExposure').value=c.baseExposure; $('cfgRegularExposure').value=c.regularExposure; $('cfgBaseLayers').value=c.baseLayers; $('cfgTransitionLayers').value=c.transitionLayers;
-    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled; $('cfgBootUpdateCheck').checked=!!c.bootUpdateCheck;
+    // One-click undo of the last replaced exposure (test pick / config save)
+    const prevR=Number(c.prevRegularExposure)||0;
+    show('undoRegExp',prevR>0&&prevR!==Number(c.regularExposure));
+    $('undoRegExp').textContent='Undo ('+prevR+'s)';
+    $('undoRegExp').dataset.v=prevR;
+    $('cfgSlowLiftDistance').value=c.slowLiftDistance; $('cfgFastLiftDistance').value=c.fastLiftDistance; $('cfgSlowLiftFeedrate').value=c.slowLiftFeedrate; $('cfgFastLiftFeedrate').value=c.fastLiftFeedrate; $('cfgDropBackFeedrate').value=c.dropBackFeedrate; $('cfgVatMl').value=c.vatMl; $('cfgLowResinMl').value=c.lowResinMl; $('cfgLowResinPause').checked=!!c.lowResinPause; $('cfgAskRefill').checked=!!c.askRefill; $('cfgUiTimeout').value=c.uiTimeoutSecs; $('cfgDryRun').checked=!!c.dryRun; $('cfgWifiEnabled').checked=!!c.wifiEnabled; $('cfgWebDashboardEnabled').checked=!!c.webDashboardEnabled; $('cfgBootUpdateCheck').checked=!!c.bootUpdateCheck; $('cfgStatsPing').checked=!!c.statsPing;
     $('cfgMqttEnabled').checked=!!c.mqttEnabled; $('cfgMqttHost').value=c.mqttHost||''; $('cfgMqttPort').value=c.mqttPort||1883; $('cfgMqttUser').value=c.mqttUser||''; $('cfgMqttPassword').value=''; $('cfgMqttTopic').value=c.mqttTopic||'TinyMaker';
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://connect.tinymakerwifi.com'; $('cfgConnectPrinterName').value=c.connectPrinterName||''; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
@@ -3012,7 +3151,12 @@ const loadConfig=async()=>{
     $('connectRecoveryCodeValue').value='';
     $('connectRecoveryCodeValue').type='password';
     $('connectCopyRecoveryButton').disabled=true;
-    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
+    $('ntfTg').checked=!!c.tgEnabled; $('ntfWa').checked=!!c.waEnabled; $('ntfDc').checked=!!c.dcEnabled; $('ntfNone').checked=!c.tgEnabled&&!c.waEnabled&&!c.dcEnabled;
+    $('cfgWaPhone').value=c.waPhone||''; $('cfgWaKey').value='';
+    $('cfgWaKey').placeholder=c.waKeySet?('Saved key: ****'+(c.waKeyTail||'')+' - type a new one to replace it'):'Key from the CallMeBot activation reply';
+    $('cfgDcWebhook').value='';
+    $('cfgDcWebhook').placeholder=c.dcHookSet?('Saved webhook: ****'+(c.dcHookTail||'')+' - paste a new one to replace it'):'https://discord.com/api/webhooks/...';
+    $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
     $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token: ********'+(c.tgTokenTail||'')+' (hidden) - type a new one to replace it'):'Paste the token from @BotFather';
     $('tgHint').textContent=(c.tgTokenSet?('Bot token saved (last 4 chars: '+(c.tgTokenTail||'?')+' - check they match your token). '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
@@ -3055,8 +3199,8 @@ $('connectBackupRestoreButton').addEventListener('click',async()=>{if(!await uiC
 $('configDefaultsButton').addEventListener('click',async()=>{const keep=$('configDefaultsButton').textContent.indexOf('integrations')>=0;if(!await uiConfirm(keep?'Reset config to defaults and keep integration settings?':'Reset config to defaults?',{danger:true}))return;try{await api('/api/config/defaults',{method:'POST'});msg(keep?'Defaults restored. Integration settings kept.':'Defaults restored.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configMqttResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset MQTT settings?',{danger:true}))return;try{await api('/api/config/mqtt/defaults',{method:'POST'});msg('MQTT settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
 $('configConnectResetButton').addEventListener('click',async()=>{if(!await uiConfirm('Reset TinyMaker Connect settings and forget this printer token?',{danger:true}))return;try{await api('/api/config/connect/defaults',{method:'POST'});msg('TinyMaker Connect settings reset.');loadConfig();}catch(e){msg(e.message,true);}});
-$('connectTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:configFormData()});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
-$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectPrinterName').value.trim()===''){msg('Enter a printer display name first.',true);$('cfgConnectPrinterName').focus();return;}if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;try{await api('/api/config',{method:'POST',body:configFormData()});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectTestButton').addEventListener('click',async()=>{msg('Testing the Connect server...');try{await api('/api/config',{method:'POST',body:configFormData()});const r=await api('/api/connect/test',{method:'POST'},12000);msg(r.message||'TinyMaker Connect server reachable.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('connectRegisterButton').addEventListener('click',async()=>{const updating=!!(connectConfig&&connectConfig.connectPrinterPublicId);if($('cfgConnectPrinterName').value.trim()===''){msg('Enter a printer display name first.',true);$('cfgConnectPrinterName').focus();return;}if($('cfgConnectLeaderboard').checked&&!await uiConfirm('Share this printer on the public leaderboard?'))return;msg(updating?'Updating the Connect registration...':'Registering with TinyMaker Connect...');try{await api('/api/config',{method:'POST',body:configFormData()});const r=await api('/api/connect/register',{method:'POST'},12000);msg(r.message||(updating?'TinyMaker Connect updated.':'TinyMaker Connect registered.'));loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectReclaimButton').addEventListener('click',async()=>{const code=$('cfgConnectRecoveryCode').value.trim();if(!code){msg('Enter your recovery code first.',true);$('cfgConnectRecoveryCode').focus();return;}try{await api('/api/config',{method:'POST',body:configFormData()});const fd=new FormData();fd.append('recovery_code',code);const r=await api('/api/connect/register',{method:'POST',body:fd},12000);$('cfgConnectRecoveryCode').value='';msg(r.message||'TinyMaker Connect profile restored.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectNewProfileButton').addEventListener('click',async()=>{if(!await uiConfirm('Setup as a new TinyMaker Connect printer? The old Connect profile will stay on the server and this printer will receive a new recovery code.'))return;try{await api('/api/config',{method:'POST',body:configFormData()});const fd=new FormData();fd.append('new_profile','1');const r=await api('/api/connect/register',{method:'POST',body:fd},12000);msg(r.message||'New TinyMaker Connect profile created.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('connectRevealRecoveryButton').addEventListener('click',async()=>{try{const r=await api('/api/connect/recovery-code',null,12000);$('connectRecoveryCodeValue').value=r.recoveryCode||'';$('connectRecoveryCodeValue').type='text';$('connectCopyRecoveryButton').disabled=!$('connectRecoveryCodeValue').value;msg('Recovery code retrieved.');}catch(e){msg(e.message,true);}});
@@ -3072,13 +3216,57 @@ $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
-$('cfgTgEnabled').addEventListener('change',updateTgFields);
 settingsTabs.forEach(t=>{$('settings'+t[0].toUpperCase()+t.slice(1)+'TabButton').addEventListener('click',()=>setSettingsTab(t));});
+$('undoRegExp').addEventListener('click',async e=>{e.preventDefault();const v=Number(e.target.dataset.v)||0;if(!v)return;$('cfgRegularExposure').value=v;try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});msg('Regular exposure back to '+v+'s.');loadConfig();}catch(err){msg(err.message,true);}});
+$('ntfNone').addEventListener('change',updateTgFields);
+$('ntfTg').addEventListener('change',updateTgFields);
+$('ntfWa').addEventListener('change',updateTgFields);
+$('waTestButton').addEventListener('click',async()=>{msg('Sending a test message...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/whatsapp/test',{method:'POST'},15000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+$('ntfDc').addEventListener('change',updateTgFields);
+$('dcTestButton').addEventListener('click',async()=>{msg('Sending a test message...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/discord/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
-$('tgHelpButton').addEventListener('click',()=>show('tgHelpModal',true));
-$('tgHelpClose').addEventListener('click',()=>show('tgHelpModal',false));
-$('tgHelpModal').addEventListener('click',e=>{if(e.target===$('tgHelpModal'))show('tgHelpModal',false);});
-$('tgTestButton').addEventListener('click',async()=>{try{await api('/api/config',{method:'POST',body:configFormData()});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
+// Contextual help: one modal, content picked by key (.qHelp marks + Telegram).
+const HELP={
+ tg:"<b>Telegram setup</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In Telegram, message <b>@BotFather</b>, send <b>/newbot</b>, follow the prompts and paste the token it gives into <b>Bot token</b>.</li><li>Open your new bot and press <b>Start</b> (or send it any message) - a bot cannot message you until you do.</li><li>Message <b>@userinfobot</b>; it replies with your numeric <b>Id</b> - that is your <b>Chat ID</b>. (For a group, add <b>@RawDataBot</b> to it and use the negative id it prints.)</li><li>Press <b>Save config</b>, then <b>Send test message</b> - if it arrives, you are done.</li></ol>",
+ layer:"<b>Layer height</b><p>Unlike FDM, the printed layer height is decided by THIS setting, not by the sliced file. Files are always a stack of 0.05 mm images: at 0.05 the printer uses every image, at 0.10 it takes every other one. Always slice with the 0.05 mm profile.</p>",
+ resin:"<b>Resin tracking</b><p>The printer has no resin sensor - it counts down an estimate from a full VAT (this size). Press <b>VAT refilled</b> after topping up, and keep <b>Ask refill</b> on so the estimate stays honest. It warns before a print that will not fit and can pause mid-print when low.</p>",
+ web:"<b>Web control</b><p>Off = this dashboard turns view-only: anyone can watch, but print control, uploads, settings and firmware updates are disabled. Turn it back on at the printer (System &gt; Advanced). Slicer upload and MQTT keep working.</p>",
+ backup:"<b>Backup &amp; restore</b><p>One file holds every setting plus the lifetime counters. <b>Backup to SD</b> before a full USB reflash - the printer offers to restore it on first boot. The file contains your MQTT password and tokens, so treat it like a secret.</p>",
+ wa:"<b>WhatsApp setup (CallMeBot)</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>Open <b>callmebot.com</b> &gt; <i>WhatsApp text messages</i> and add the bot's current phone number to your contacts.</li><li>Send it the message <b>I allow callmebot to send me messages</b> from your WhatsApp.</li><li>It replies with your personal <b>API key</b> - enter it here with your phone number (with country code).</li><li><b>Save config</b>, then <b>Send test message</b>.</li></ol><p class='hint'>Messages travel through the free CallMeBot gateway (a third-party service) - unlike Telegram, which the printer talks to directly.</p>",
+ dc:"<b>Discord setup (webhook)</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>In your Discord server open <b>Server Settings &gt; Integrations &gt; Webhooks</b>.</li><li><b>New Webhook</b> - pick the channel the printer should post to, then <b>Copy Webhook URL</b>.</li><li>Paste the URL here, <b>Save config</b>, then <b>Send test message</b>.</li></ol><p class='hint'>The webhook URL is a secret - anyone holding it can post to that channel. The printer talks to Discord directly.</p>"};
+const showHelp=k=>{$('helpBody').innerHTML=HELP[k]||'';show('helpModal',true);};
+document.addEventListener('click',e=>{const q=e.target.closest('.qHelp');if(q){e.preventDefault();showHelp(q.dataset.help);}});
+// Getting started: dismissible first-steps checklist. Some steps tick
+// themselves from live data; the rest are clicked off and remembered.
+const GS=[
+ {k:'wifi',t:'Connect to WiFi',d:'Done - you are looking at the dashboard.',auto:()=>true},
+ {k:'slicer',t:'Set up PrusaSlicer',d:"Import the profile, add a physical printer at tinymaker.local - <a href='https://slibbinas.github.io/TinyMakerWifi/manual/#print-prusa' target='_blank' rel='noopener'>manual</a>."},
+ {k:'model',t:'Get a model onto the SD card',d:'Send from the slicer, upload in SD manager, or copy an .sl1/.zip to the card.',auto:()=>filesItems.some(i=>i.type==='model')},
+ {k:'print',t:'Run your first print',d:'Pick the model in the Print menu or press Start here.',auto:()=>!!(statusData&&Number(statusData.lifetimePrintSecs)>0)},
+ {k:'expo',t:'Calibrate exposure for your resin',d:"System &gt; Advanced &gt; Exposure test - pick the best bar and the printer sets the time. <a href='https://slibbinas.github.io/TinyMakerWifi/manual/#advanced' target='_blank' rel='noopener'>Manual</a>."},
+ {k:'integr',t:'Optional: integrations',d:'Telegram, Home Assistant (MQTT) and TinyMaker Connect live in Settings.'}];
+const gsDone=s=>(s.auto&&s.auto())||localStorage.getItem('tmGs_'+s.k)==='1';
+const renderGs=()=>{
+  const hidden=localStorage.getItem('tmGsHidden')==='1';
+  show('gsCard',!hidden);
+  if(hidden)return;
+  $('gsList').innerHTML=GS.map(s=>{
+    const on=gsDone(s);
+    return "<div class='gsRow'><span class='gsMark"+(on?" on":"")+"' data-gs='"+s.k+"'>"+(on?"&#10003;":"&#9675;")+"</span><div><b>"+s.t+"</b><div class='meta'>"+s.d+"</div></div></div>";
+  }).join('');
+};
+$('gsList').addEventListener('click',e=>{const m=e.target.closest('.gsMark');if(!m)return;const s=GS.find(x=>x.k===m.dataset.gs);if(!s||(s.auto&&s.auto()))return;const key='tmGs_'+s.k;localStorage.setItem(key,localStorage.getItem(key)==='1'?'0':'1');renderGs();});
+$('gsHide').addEventListener('click',()=>{localStorage.setItem('tmGsHidden','1');renderGs();});
+$('gsBtn').addEventListener('click',e=>{e.preventDefault();localStorage.setItem('tmGsHidden','0');openView('home');renderGs();$('gsCard').scrollIntoView({behavior:'smooth',block:'start'});});
+renderGs();
+// Light/dark toggle: flips the html data-theme attribute the boot script set,
+// persists to localStorage and keeps the Manual link's theme param in sync.
+const applyThemeLink=()=>{const l=document.documentElement.getAttribute('data-theme')==='light';$('manualLink').href='https://slibbinas.github.io/TinyMakerWifi/manual/'+(l?'':'?theme=dark');};
+$('themeBtn').addEventListener('click',e=>{e.preventDefault();const toLight=document.documentElement.getAttribute('data-theme')!=='light';if(toLight)document.documentElement.setAttribute('data-theme','light');else document.documentElement.removeAttribute('data-theme');try{localStorage.setItem('tmTheme',toLight?'light':'dark');}catch(err){}applyThemeLink();});
+applyThemeLink();
+$('helpClose').addEventListener('click',()=>show('helpModal',false));
+$('helpModal').addEventListener('click',e=>{if(e.target===$('helpModal'))show('helpModal',false);});
+$('tgTestButton').addEventListener('click',async()=>{msg('Sending a test message...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/telegram/test',{method:'POST'},12000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('homeViewButton').addEventListener('click',()=>openView('home'));
 $('connectViewButton').addEventListener('click',()=>openView('connect'));
 $('configViewButton').addEventListener('click',()=>openView('config'));
@@ -3103,6 +3291,14 @@ const loadUpdate=async()=>{
   setText('updInstalled',updInstalledVer||'-');setText('updLatest','-');
   $('updMsg').textContent='Checking the latest version - takes up to ~10 s...';
   $('updInstallLatest').disabled=true;
+  // Community install counter - straight from the stats endpoint, best-effort.
+  fetch('https://tinymaker-stats.slibbinas.workers.dev/stats').then(r=>r.json()).then(s=>{
+    if(!s.printers)return;
+    let top='',n=0;const bv=s.by_version||{};
+    for(const v in bv)if(bv[v]>n){n=bv[v];top=v;}
+    setText('communityStats','Community: '+s.printers+' printer'+(s.printers===1?'':'s')+' running TinyMakerWifi'+(top?' - most on '+top:''));
+    show('communityStats',true);
+  }).catch(()=>{});
   try{
     const r=await fetch('https://slibbinas.github.io/TinyMakerWifi/versions.txt',{cache:'no-store'});
     if(!r.ok)throw 0;
@@ -3252,6 +3448,48 @@ void otaBootCheckMaybePrompt() {
   if (!bootUpdateCheckEnabled || WiFi.status() != WL_CONNECTED) return;
   otaCheckLatest(2500);
   if (otaHasUpdate()) screenBootUpdatePrompt();
+}
+
+// ---- Anonymous install stats ----------------------------------------------
+// Once per firmware version (the first boot with WiFi after a flash) the
+// printer sends ONE anonymous ping: a SHA-256 hash of the factory MAC, the
+// firmware version and the lifetime print hours. Nothing else is sent or
+// stored (see the manual). Switchable in Settings; a failed ping is silent
+// and retried on the next boot.
+String statsHardwareHash() {
+  String seed = "TinyMakerWiFi:" + connectHardwareId();
+  unsigned char digest[32];
+  mbedtls_sha256_ret((const unsigned char *)seed.c_str(), seed.length(), digest, 0);
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(hex + i * 2, "%02x", digest[i]);
+  hex[64] = 0;
+  return String(hex);
+}
+
+void statsPingMaybe() {
+  if (!statsPingEnabled || WiFi.status() != WL_CONNECTED) return;
+  String cur = connectFirmwareVersion();
+  sysPrefs.begin("tinymaker", true);
+  String pinged = sysPrefs.getString("statsPingVer", "");
+  sysPrefs.end();
+  if (pinged == cur) return;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  if (!http.begin(client, STATS_PING_URL)) return;
+  http.setTimeout(5000);
+  http.addHeader("Content-Type", "application/json");
+  String body = "{\"id\":\"" + statsHardwareHash() + "\",\"version\":\"" + cur +
+                "\",\"hours\":" + String(totalPrintSecs / 3600.0, 1) + "}";
+  int code = http.POST(body);
+  http.end();
+  if (code >= 200 && code < 300) {
+    sysPrefs.begin("tinymaker", false);
+    sysPrefs.putString("statsPingVer", cur);
+    sysPrefs.end();
+    DBGLN("Stats ping sent");
+  }
 }
 
 // Download a firmware image over HTTPS and flash it. Shows progress on the
@@ -3690,6 +3928,38 @@ void network_setup() {
     // No credentials yet (first boot / after Reset WiFi): captive portal
     // in NON-blocking mode so we can draw the bar filling toward the
     // 120 s timeout while wm.process() serves the portal.
+    // Branded to match the dashboard: dark theme + orange accent + project
+    // logo/version and reference links (the phone is offline here, so the
+    // URLs are for later - jot-down info, not navigation).
+    wm.setDarkMode(true);
+    wm.setCustomHeadElement(
+      "<link rel='icon' href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+      "<rect x='8' y='40' width='48' height='9' rx='3' fill='%23e8720c'/>"
+      "<rect x='14' y='27' width='36' height='9' rx='3' fill='%23e8720c' opacity='.75'/>"
+      "<rect x='20' y='14' width='24' height='9' rx='3' fill='%23e8720c' opacity='.5'/>"
+      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='%234da3ff' stroke-width='5' stroke-linecap='round'/>"
+    // Green P badge: tells the PRINTER's pinned tab apart from the landing
+    // page and the manual, which share the same base logo.
+    "<circle cx='47' cy='46' r='16' fill='%232fbf4f'/>"
+    "<text x='47' y='53' font-family='Arial' font-size='20' font-weight='bold' fill='white' text-anchor='middle'>P</text></svg>\">"
+      "<style>button{background:#e8720c;border:0}button:hover,button:focus{background:#c95f06}"
+      "a,a:visited{color:#4da3ff}</style>");
+    wm.setCustomMenuHTML(
+      "<div style='text-align:center;margin:6px 0 16px'>"
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='56' height='56'>"
+      "<rect x='8' y='40' width='48' height='9' rx='3' fill='#e8720c'/>"
+      "<rect x='14' y='27' width='36' height='9' rx='3' fill='#e8720c' opacity='.75'/>"
+      "<rect x='20' y='14' width='24' height='9' rx='3' fill='#e8720c' opacity='.5'/>"
+      "<path d='M22 6 A14 14 0 0 1 42 6' fill='none' stroke='#4da3ff' stroke-width='5' stroke-linecap='round'/></svg>"
+      "<div style='font-size:15px;font-weight:600;margin-top:2px'>TinyMakerWifi"
+#ifdef FIRMWARE_VERSION
+      " v" FIRMWARE_VERSION
+#endif
+      "</div>"
+      "<div style='font-size:12px;color:#888;line-height:1.6;margin-top:6px'>"
+      "Pick your home WiFi below - the printer connects and shows its address.<br>"
+      "Manual: slibbinas.github.io/TinyMakerWifi/manual<br>"
+      "Project: tinymakerwifi.com &middot; Printer: tinymaker3d.com</div></div>");
     wm.setConfigPortalBlocking(false);
     wm.startConfigPortal("TinyMaker-Setup");
     netProgressStart("WiFi setup - join AP:", "TinyMaker-Setup");
@@ -3750,6 +4020,8 @@ void network_setup() {
   server.on("/api/connect/backup", HTTP_POST, handleApiConnectBackup);
   server.on("/api/connect/restore", HTTP_POST, handleApiConnectRestore);
   server.on("/api/telegram/test", HTTP_POST, handleApiTelegramTest);
+  server.on("/api/whatsapp/test", HTTP_POST, handleApiWhatsAppTest);
+  server.on("/api/discord/test", HTTP_POST, handleApiDiscordTest);
   server.on("/api/print/start", HTTP_POST, handleApiPrintStart);
   server.on("/api/vat/refilled", HTTP_POST, handleApiVatRefilled);
   server.on("/api/update", HTTP_GET, handleApiUpdateGet);
@@ -3812,6 +4084,7 @@ void network_setup() {
   String ip = "IP: " + WiFi.localIP().toString();
   netMessage("WiFi connected", ip.c_str());
   delay(700);
+  statsPingMaybe();
   otaBootCheckMaybePrompt();
   if (screen == 424) return;
   delay(800);
@@ -3877,12 +4150,9 @@ void wifiInfoValues() {
     gfx2->print(r);
     gfx2->print(" dBm ");
     gfx2->print(r > -60 ? "(Good)" : (r > -75 ? "(OK)" : "(Weak)"));
-    // Same green strength bars as the main-menu badge/dashboard: RSSI
-    // > -60 = 3 bars, > -75 = 2, else 1; unlit bars stay dark grey.
-    int n = r > -60 ? 3 : (r > -75 ? 2 : 1);
-    gfx2->fillRect(142, 31, 3, 4,  n >= 1 ? GREEN : DARKGREY);
-    gfx2->fillRect(147, 27, 3, 8,  n >= 2 ? GREEN : DARKGREY);
-    gfx2->fillRect(152, 23, 3, 12, n >= 3 ? GREEN : DARKGREY);
+    // No strength bars here: the dBm + word already say it, and the bars
+    // collided with the "(Good)" text (user finding, 0.14.3). The main-menu
+    // badge keeps its bars.
     gfx2->setCursor(5, 55);
     gfx2->print("IP: ");
     gfx2->print(WiFi.localIP());
