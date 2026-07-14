@@ -956,6 +956,7 @@ String configJson() {
   out += String(sdBk ? sdBackupSavedEpoch() : 0);
   out += tinymakerConnectConfigJson();
   out += tinymakerTelegramConfigJson();
+  out += tinymakerWhatsAppConfigJson();
   return out;
 }
 
@@ -997,14 +998,21 @@ void applyConfigRequest() {
   connectPrinterName = formString("connect_printer_name", connectPrinterName, 64);
   if (connectPrinterName.length() == 0) connectPrinterName = "TinyMaker";
   connectLeaderboardOptIn = connectEnabled && server.hasArg("connect_leaderboard");
-  tgEnabled = server.hasArg("tg_enabled");
-  if (!wifiEnabled) tgEnabled = false;
+  // One notification channel at a time (radio in the form): Telegram OR
+  // WhatsApp OR off. Credentials of the inactive channel are kept.
+  String ntf = formString("notify_channel", tgEnabled ? "tg" : (waEnabled ? "wa" : "none"), 8);
+  tgEnabled = wifiEnabled && ntf == "tg";
+  waEnabled = wifiEnabled && ntf == "wa";
   // Token is a secret: only overwrite when a new one is supplied, so a blank
   // field keeps the stored value (same rule as the MQTT password).
   if (server.hasArg("tg_token") && server.arg("tg_token").length() > 0) {
     tgToken = formString("tg_token", tgToken, 64);
   }
   tgChat = formString("tg_chat", tgChat, 32);
+  waPhone = formString("wa_phone", waPhone, 20);
+  if (server.hasArg("wa_apikey") && server.arg("wa_apikey").length() > 0) {
+    waApiKey = formString("wa_apikey", waApiKey, 16);
+  }
 
   savePrintSettings();
   saveDeviceConfig();
@@ -2008,8 +2016,12 @@ void handleRootPage() {
       <button id='connectRegisterButton' class='button secondary' type='button'>Register TinyMaker Connect</button>
       <button id='configConnectResetButton' class='button secondary hidden' type='button'>Reset TinyMaker Connect</button>
     </div>
-    <div class='subhead'>Telegram notifications</div>
-    <label class='check spanAll'><input name='tg_enabled' id='cfgTgEnabled' type='checkbox' value='1'><span>Enable Telegram notifications</span></label>
+    <div class='subhead'>Phone notifications</div>
+    <div class='spanAll' style='display:flex;gap:18px;flex-wrap:wrap'>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfNone' value='none'><span>Off</span></label>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfTg' value='tg'><span>Telegram</span></label>
+      <label class='check'><input type='radio' name='notify_channel' id='ntfWa' value='wa'><span>WhatsApp<a href='#' class='qHelp' data-help='wa'>?</a></span></label>
+    </div>
     <div id='tgFields' class='spanAll hidden'>
       <div class='configGrid'>
         <label class='spanAll'><span>Bot token</span><span class='pwWrap'><input name='tg_token' id='cfgTgToken' type='password' maxlength='64' autocomplete='off' placeholder='Leave blank to keep current'><button id='cfgTgTokenShow' class='eyeBtn' type='button' title='Show/hide what you typed'>&#128065;</button></span></label>
@@ -2020,6 +2032,14 @@ void handleRootPage() {
         <button id='tgHelpButton' class='button secondary' type='button'>? How to get the token &amp; chat ID</button>
         <button id='tgTestButton' class='button secondary' type='button'>Send test message</button>
       </div>
+    </div>
+    <div id='waFields' class='spanAll hidden'>
+      <div class='configGrid'>
+        <label><span>Phone (with country code)</span><input name='wa_phone' id='cfgWaPhone' type='text' maxlength='20' placeholder='+3706xxxxxxx'></label>
+        <label><span>CallMeBot API key</span><input name='wa_apikey' id='cfgWaKey' type='password' maxlength='16' autocomplete='off' placeholder='Leave blank to keep current'></label>
+      </div>
+      <div id='waHint' class='hint'>Messages go through the free CallMeBot gateway - press ? above for the one-time activation.</div>
+      <button id='waTestButton' class='button secondary' type='button'>Send test message</button>
     </div>
   </div>
   <button id='configSaveButton' type='submit'>Save config</button>
@@ -2731,7 +2751,7 @@ const confirmNetworkToggle=async e=>{
 };
 const updateMqttFields=()=>show('mqttFields',$('cfgMqttEnabled').checked);
 const updateConnectFields=()=>show('connectFields',$('cfgConnectEnabled').checked);
-const updateTgFields=()=>show('tgFields',$('cfgTgEnabled').checked);
+const updateTgFields=()=>{show('tgFields',$('ntfTg').checked);show('waFields',$('ntfWa').checked);};
 const updateConnectView=c=>{
   c=c||connectConfig||{};
   const id=c.connectPrinterPublicId||'';
@@ -2759,7 +2779,10 @@ const loadConfig=async()=>{
     $('mqttHint').textContent=c.mqttPasswordSet?'Password is saved. Enter a new one only if you want to replace it.':'MQTT password is not set.';
     $('cfgConnectEnabled').checked=!!c.connectEnabled; $('cfgConnectBaseUrl').value=c.connectBaseUrl||'https://tinymaker.inductie.nu'; $('cfgConnectPrinterName').value=c.connectPrinterName||'TinyMaker'; $('cfgConnectLeaderboard').checked=!!c.connectLeaderboardOptIn;
     const connectId=c.connectPrinterPublicId||''; $('connectHint').textContent=connectId?('Registered as '+connectId+'. Publish token stored'+(c.connectTokenTail?(' (ends in '+c.connectTokenTail+')'):'')+' - cannot be viewed. '+(c.connectLeaderboardOptIn?'Leaderboard sharing on.':'Leaderboard sharing off.')):(c.connectLastStatus||'Registering stores a printer token for publishing models, ratings and bookmarks. Leaderboard sharing is optional.');$('connectRegisterButton').textContent=connectId?'Update TinyMaker Connect':'Register TinyMaker Connect';
-    $('cfgTgEnabled').checked=!!c.tgEnabled; $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
+    $('ntfTg').checked=!!c.tgEnabled; $('ntfWa').checked=!!c.waEnabled; $('ntfNone').checked=!c.tgEnabled&&!c.waEnabled;
+    $('cfgWaPhone').value=c.waPhone||''; $('cfgWaKey').value='';
+    $('cfgWaKey').placeholder=c.waKeySet?('Saved key: ****'+(c.waKeyTail||'')+' - type a new one to replace it'):'Key from the CallMeBot activation reply';
+    $('cfgTgToken').value=''; $('cfgTgToken').type='password'; $('cfgTgChat').value=c.tgChat||'';
     $('cfgTgToken').placeholder=c.tgTokenSet?('Saved token: ********'+(c.tgTokenTail||'')+' (hidden) - type a new one to replace it'):'Paste the token from @BotFather';
     $('tgHint').textContent=(c.tgTokenSet?('Bot token saved (last 4 chars: '+(c.tgTokenTail||'?')+' - check they match your token). '):'Bot token is not set. ')+'Messages you when a print finishes, pauses for low resin, or is canceled.';
     updateConnectView(c);
@@ -2805,7 +2828,10 @@ $('cfgWifiEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgWebDashboardEnabled').addEventListener('change',confirmNetworkToggle);
 $('cfgMqttEnabled').addEventListener('change',updateMqttFields);
 $('cfgConnectEnabled').addEventListener('change',updateConnectFields);
-$('cfgTgEnabled').addEventListener('change',updateTgFields);
+$('ntfNone').addEventListener('change',updateTgFields);
+$('ntfTg').addEventListener('change',updateTgFields);
+$('ntfWa').addEventListener('change',updateTgFields);
+$('waTestButton').addEventListener('click',async()=>{msg('Sending a test message...');try{await api('/api/config',{method:'POST',body:new FormData($('configForm'))});const r=await api('/api/whatsapp/test',{method:'POST'},15000);msg(r.message||'Test message sent.');loadConfig();}catch(e){msg(e.message,true);loadConfig();}});
 $('cfgTgTokenShow').addEventListener('click',()=>{const i=$('cfgTgToken');i.type=i.type==='password'?'text':'password';});
 // Contextual help: one modal, content picked by key (.qHelp marks + Telegram).
 const HELP={
@@ -2813,7 +2839,8 @@ const HELP={
  layer:"<b>Layer height</b><p>Unlike FDM, the printed layer height is decided by THIS setting, not by the sliced file. Files are always a stack of 0.05 mm images: at 0.05 the printer uses every image, at 0.10 it takes every other one. Always slice with the 0.05 mm profile.</p>",
  resin:"<b>Resin tracking</b><p>The printer has no resin sensor - it counts down an estimate from a full VAT (this size). Press <b>VAT refilled</b> after topping up, and keep <b>Ask refill</b> on so the estimate stays honest. It warns before a print that will not fit and can pause mid-print when low.</p>",
  web:"<b>Web control</b><p>Off = this dashboard turns view-only: anyone can watch, but print control, uploads, settings and firmware updates are disabled. Turn it back on at the printer (System &gt; Advanced). Slicer upload and MQTT keep working.</p>",
- backup:"<b>Backup &amp; restore</b><p>One file holds every setting plus the lifetime counters. <b>Backup to SD</b> before a full USB reflash - the printer offers to restore it on first boot. The file contains your MQTT password and tokens, so treat it like a secret.</p>"};
+ backup:"<b>Backup &amp; restore</b><p>One file holds every setting plus the lifetime counters. <b>Backup to SD</b> before a full USB reflash - the printer offers to restore it on first boot. The file contains your MQTT password and tokens, so treat it like a secret.</p>",
+ wa:"<b>WhatsApp setup (CallMeBot)</b><ol style='margin:10px 0 0;padding-left:20px;line-height:1.6'><li>Open <b>callmebot.com</b> &gt; <i>WhatsApp text messages</i> and add the bot's current phone number to your contacts.</li><li>Send it the message <b>I allow callmebot to send me messages</b> from your WhatsApp.</li><li>It replies with your personal <b>API key</b> - enter it here with your phone number (with country code).</li><li><b>Save config</b>, then <b>Send test message</b>.</li></ol><p class='hint'>Messages travel through the free CallMeBot gateway (a third-party service) - unlike Telegram, which the printer talks to directly.</p>"};
 const showHelp=k=>{$('helpBody').innerHTML=HELP[k]||'';show('helpModal',true);};
 document.addEventListener('click',e=>{const q=e.target.closest('.qHelp');if(q){e.preventDefault();showHelp(q.dataset.help);}});
 // Getting started: dismissible first-steps checklist. Some steps tick
@@ -3488,6 +3515,7 @@ void network_setup() {
   server.on("/api/connect/test", HTTP_POST, handleApiConnectTest);
   server.on("/api/connect/register", HTTP_POST, handleApiConnectRegister);
   server.on("/api/telegram/test", HTTP_POST, handleApiTelegramTest);
+  server.on("/api/whatsapp/test", HTTP_POST, handleApiWhatsAppTest);
   server.on("/api/print/start", HTTP_POST, handleApiPrintStart);
   server.on("/api/vat/refilled", HTTP_POST, handleApiVatRefilled);
   server.on("/api/update", HTTP_GET, handleApiUpdateGet);

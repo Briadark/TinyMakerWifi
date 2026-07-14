@@ -16,6 +16,10 @@ unless noted. Community contributors are tagged inline.
 ## [Unreleased] — `experimental` branch
 
 ### Added
+- **WhatsApp notifications** — same three messages as Telegram (finished /
+  low-resin pause / canceled), delivered through the free CallMeBot gateway
+  (one-time activation from your WhatsApp, inline help included). Settings now
+  has a single *Phone notifications* choice: Off / Telegram / WhatsApp.
 - **Light theme** — the dashboard gets a light/dark toggle (the crescent next
   to *Manual*); your choice sticks per browser. Same orange, no flash on load.
 - **Branded WiFi setup** — the `TinyMaker-Setup` portal now shows the project

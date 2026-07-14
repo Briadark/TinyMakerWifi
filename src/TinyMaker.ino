@@ -124,6 +124,9 @@ String connectLastStatus = "";
 bool tgEnabled = false;             // Telegram outbound notifications (V1)
 String tgToken = "";                // bot token (secret - never echoed to browser)
 String tgChat = "";                 // chat id to notify
+bool waEnabled = false;             // WhatsApp notifications via CallMeBot (one channel at a time)
+String waPhone = "";                // phone with country code
+String waApiKey = "";               // CallMeBot key (secret - never echoed to browser)
 bool statsPingEnabled = true;       // anonymous install ping (MAC hash + version + print hours)
 unsigned long lastUiActivityMs = 0;
 bool uiBlanked = false;
@@ -171,6 +174,10 @@ void loadDeviceConfig() {
   tgEnabled = sysPrefs.getBool("tgEnabled", false);
   tgToken = sysPrefs.getString("tgToken", "");
   tgChat = sysPrefs.getString("tgChat", "");
+  waEnabled = sysPrefs.getBool("waEnabled", false);
+  waPhone = sysPrefs.getString("waPhone", "");
+  waApiKey = sysPrefs.getString("waApiKey", "");
+  if (tgEnabled && waEnabled) waEnabled = false;  // one channel at a time
   vatRemainingMl = sysPrefs.getFloat("vatRemMl", -1);
   lowResinPauseEnabled = sysPrefs.getBool("lowResinOn", false);
   lowResinThresholdMl = sysPrefs.getUChar("lowResinMl", 2);
@@ -204,6 +211,9 @@ void saveDeviceConfig() {
   sysPrefs.putBool("tgEnabled", tgEnabled);
   sysPrefs.putString("tgToken", tgToken);
   sysPrefs.putString("tgChat", tgChat);
+  sysPrefs.putBool("waEnabled", waEnabled);
+  sysPrefs.putString("waPhone", waPhone);
+  sysPrefs.putString("waApiKey", waApiKey);
   sysPrefs.putBool("lowResinOn", lowResinPauseEnabled);
   sysPrefs.putUChar("lowResinMl", lowResinThresholdMl);
   sysPrefs.putBool("askRefill", askRefillEnabled);
@@ -483,6 +493,12 @@ String buildConfigBackupJson() {
   out += backupEscape(tgToken);
   out += "\",\"tgChat\":\"";
   out += backupEscape(tgChat);
+  out += "\",\"waEnabled\":";
+  out += waEnabled ? "true" : "false";
+  out += ",\"waPhone\":\"";
+  out += backupEscape(waPhone);
+  out += "\",\"waApiKey\":\"";
+  out += backupEscape(waApiKey);
   out += "\",\"connectEnabled\":";
   out += connectEnabled ? "true" : "false";
   out += ",\"connectBaseUrl\":\"";
@@ -581,6 +597,10 @@ void applyConfigBackup(const String &j) {
   tgEnabled = wifiEnabled && backupBool(j, "tgEnabled", tgEnabled);
   tgToken = backupStr(j, "tgToken", tgToken);
   tgChat = backupStr(j, "tgChat", tgChat);
+  waEnabled = wifiEnabled && backupBool(j, "waEnabled", waEnabled);
+  waPhone = backupStr(j, "waPhone", waPhone);
+  waApiKey = backupStr(j, "waApiKey", waApiKey);
+  if (tgEnabled && waEnabled) waEnabled = false;  // one channel at a time
   connectEnabled = wifiEnabled && backupBool(j, "connectEnabled", connectEnabled);
   connectBaseUrl = backupStr(j, "connectBaseUrl", connectBaseUrl);
   connectPrinterName = backupStr(j, "connectPrinterName", connectPrinterName);
