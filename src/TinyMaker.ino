@@ -118,7 +118,7 @@ String mqttUser = "";
 String mqttPass = "";
 String mqttTopic = "TinyMaker";
 bool connectEnabled = false;        // TinyMaker Connect web-service integration
-String connectBaseUrl = "https://tinymaker.inductie.nu";
+String connectBaseUrl = "https://connect.tinymakerwifi.com";
 String connectPrinterName = "";
 bool connectLeaderboardOptIn = false;
 String connectPrinterPublicId = "";
@@ -167,7 +167,10 @@ void loadDeviceConfig() {
   mqttPass = sysPrefs.getString("mqttPass", "");
   mqttTopic = sysPrefs.getString("mqttTopic", "TinyMaker");
   connectEnabled = sysPrefs.getBool("tmcEnabled", false);
-  connectBaseUrl = sysPrefs.getString("tmcUrl", "https://tinymaker.inductie.nu");
+  connectBaseUrl = sysPrefs.getString("tmcUrl", "https://connect.tinymakerwifi.com");
+  if (connectBaseUrl == "https://tinymaker.inductie.nu") {
+    connectBaseUrl = "https://connect.tinymakerwifi.com";
+  }
   connectPrinterName = sysPrefs.getString("tmcName", "");
   connectLeaderboardOptIn = sysPrefs.getBool("tmcLeaderboard", false);
   connectPrinterPublicId = sysPrefs.getString("tmcPublicId", "");
@@ -605,7 +608,9 @@ void applyConfigBackup(const String &j) {
   connectEnabled = wifiEnabled && backupBool(j, "connectEnabled", connectEnabled);
   connectBaseUrl = backupStr(j, "connectBaseUrl", connectBaseUrl);
   connectPrinterName = backupStr(j, "connectPrinterName", connectPrinterName);
-  connectLeaderboardOptIn = connectEnabled && backupBool(j, "connectLeaderboard", connectLeaderboardOptIn);
+  if (connectEnabled) {
+    connectLeaderboardOptIn = backupBool(j, "connectLeaderboard", connectLeaderboardOptIn);
+  }
   connectPrinterPublicId = backupStr(j, "connectPublicId", connectPrinterPublicId);
   connectPublishToken = backupStr(j, "connectToken", connectPublishToken);
   connectRecoveryCode = backupStr(j, "connectRecoveryCode", connectRecoveryCode);
@@ -1679,7 +1684,7 @@ void loop() {
         #endif
         screen1();
         #if ENABLE_NETWORK
-        tinymakerConnectScheduleBackup();
+        tinymakerConnectSchedulePrintSync();
         #endif
       }
         break;

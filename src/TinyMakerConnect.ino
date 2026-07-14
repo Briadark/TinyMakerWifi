@@ -17,6 +17,7 @@
 #include <WiFiClientSecure.h>
 
 bool connectBackupPending = false;
+bool connectProfilePending = false;
 unsigned long connectBackupDueMs = 0;
 
 String connectNormalizeBaseUrl(String url) {
@@ -29,7 +30,7 @@ bool connectConfigured() {
   // The base URL defaults to a non-empty value, so "has a URL" alone would
   // make this true on every factory-fresh device.
   return connectEnabled ||
-         connectBaseUrl != "https://tinymaker.inductie.nu" ||
+         connectBaseUrl != "https://connect.tinymakerwifi.com" ||
          connectPrinterPublicId.length() > 0 ||
          connectPublishToken.length() > 0;
 }
@@ -443,19 +444,72 @@ bool tinymakerConnectBackupSettings(String &message) {
   return true;
 }
 
+String tinymakerConnectProfileJson() {
+  String out = "{\"profileOnly\":true,\"firmware\":\"";
+  out += connectFirmwareVersion();
+  out += "\",\"connectPrinterName\":\"";
+  out += backupEscape(connectPrinterName);
+  out += "\",\"connectLeaderboard\":";
+  out += connectLeaderboardOptIn ? "true" : "false";
+  out += ",\"printSecs\":";
+  out += String(totalPrintSecs);
+  out += "}";
+  return out;
+}
+
+bool tinymakerConnectSyncProfile(String &message) {
+  if (!connectEnabled || connectPublishToken.length() == 0) {
+    message = "";
+    return true;
+  }
+  if (printerBusy()) {
+    message = "printer busy";
+    return false;
+  }
+
+  String response;
+  String error;
+  if (!connectPostJson("/api/printers/me/backup", tinymakerConnectProfileJson(), response, error)) {
+    connectLastStatus = error;
+    message = error;
+    saveDeviceConfig();
+    return false;
+  }
+
+  connectLastStatus = "profile synced to Connect";
+  saveDeviceConfig();
+  message = connectLastStatus;
+  return true;
+}
+
 void tinymakerConnectScheduleBackup() {
-  if (connectEnabled && connectAutoBackup && connectPublishToken.length() > 0) {
-    connectBackupPending = true;
+  if (connectEnabled && connectPublishToken.length() > 0) {
+    if (connectAutoBackup) connectBackupPending = true;
+    else connectProfilePending = true;
+    connectBackupDueMs = millis() + 3000UL;
+  }
+}
+
+void tinymakerConnectSchedulePrintSync() {
+  if (connectEnabled && connectPublishToken.length() > 0 && (connectAutoBackup || connectLeaderboardOptIn)) {
+    if (connectAutoBackup) connectBackupPending = true;
+    else connectProfilePending = true;
     connectBackupDueMs = millis() + 3000UL;
   }
 }
 
 void tinymakerConnectLoop() {
-  if (!connectBackupPending || printerBusy()) return;
+  if ((!connectBackupPending && !connectProfilePending) || printerBusy()) return;
   if ((long)(millis() - connectBackupDueMs) < 0) return;
-  connectBackupPending = false;
   String message;
-  tinymakerConnectBackupSettings(message);
+  if (connectBackupPending) {
+    connectBackupPending = false;
+    connectProfilePending = false;
+    tinymakerConnectBackupSettings(message);
+  } else {
+    connectProfilePending = false;
+    tinymakerConnectSyncProfile(message);
+  }
 }
 
 bool tinymakerConnectFetchBackup(String &backupJson, uint32_t &epoch, String &message) {
