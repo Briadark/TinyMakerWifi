@@ -1955,7 +1955,8 @@ void handleRootPage() {
     <button id='modelStartButton' class='spanAll' type='button'>Start print</button>
   </div>
   <div id='previewWrap' class='hidden' style='margin-top:12px'>
-    <canvas id='modelPreviewCanvas' style='width:100%;border:1px solid #3a3a3f;border-radius:8px;background:#151517'></canvas>
+    <div id='prevSpin' class='updSpin hidden' style='margin:14px auto'></div>
+    <canvas id='modelPreviewCanvas' style='width:100%;border:1px solid var(--line);border-radius:8px;background:var(--pv)'></canvas>
     <div class='hint'>Preview is built in the browser from every Nth sliced layer; the box is the printer's build volume (40.8 &times; 30.6 &times; 68 mm).</div>
   </div>
 </section>
@@ -2530,7 +2531,9 @@ const fetchSlices=async(name,layers,modelH,btn)=>{
     const li=N>1?1+Math.round(k*(layers-1)/(N-1)):1;
     const img=new Image();
     img.src='/api/files/layer?name='+enc(name)+'&i='+li;
-    await new Promise((res,rej)=>{img.onload=res;img.onerror=()=>rej(new Error('layer '+li+' failed to load'));});
+    // A hung request used to stall the preview forever with no way out -
+    // give every layer fetch a hard timeout (user finding, 0.14.3).
+    await new Promise((res,rej)=>{const t=setTimeout(()=>{img.src='';rej(new Error('layer '+li+' timed out - try again'));},20000);img.onload=()=>{clearTimeout(t);res();};img.onerror=()=>{clearTimeout(t);rej(new Error('layer '+li+' failed to load'));};});
     octx.drawImage(img,0,0,gw,gh);
     const d=octx.getImageData(0,0,gw,gh).data;
     const s=new Uint8Array(gw*gh);
@@ -2547,12 +2550,13 @@ const modelPreview=async()=>{
   if(!layers){msg('Model details are still loading - try again.',true);return;}
   const modelH=parseFloat($('modelHeight').textContent)||layers*0.05;
   const btn=$('modelPreviewButton');btn.disabled=true;
-  show('previewWrap',true);
+  show('previewWrap',true);show('prevSpin',true);
   try{
     if(slicesCache.name!==selectedModel||!slicesCache.slices.length)
       await fetchSlices(selectedModel,layers,modelH,btn);
     drawIso($('modelPreviewCanvas'),1);
   }catch(e){msg(e.message,true);show('previewWrap',false);}
+  show('prevSpin',false);
   btn.disabled=false;btn.textContent='Preview 3D';
 };
 
